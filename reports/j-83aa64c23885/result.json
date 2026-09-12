@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32276",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2153",
+  "candidate_commit": "a69473368a934197e72bbf7b0794e78316c2e5ee",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly fixes the official disabled request mapping but incorrectly converts MiniMax adaptive mode into mandatory enabled reasoning, and it leaves the original reasoning_effort=none counterexample unresolved.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-83aa64c23885/venv/bin/python (base request-construction reproduction)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the exact prepared source import, silent dropping of thinking.type=disabled, and absence of MiniMax thinking_mode on the recorded base."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-83aa64c23885/venv/bin/python -m pytest test/registered/unit/entrypoints/openai/test_protocol.py -q -k minimax_thinking",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 4 passed, 43 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-83aa64c23885/venv/bin/python (independent request normalization matrix)",
+      "exit_code": 0,
+      "what_was_measured": "Disabled maps correctly; adaptive incorrectly maps to enabled; reasoning_effort=none lacks thinking_mode; precedence, conflict, invalid-shape, and non-MiniMax cases were recorded."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-83aa64c23885/venv/bin/python -m pytest test/registered/unit/entrypoints/openai/test_protocol.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Complete focused protocol module: 47 passed and 25 subtests passed."
+    },
+    {
+      "command": "curl MiniMaxAI/MiniMax-M3 chat_template.jinja and inspect thinking_mode branches",
+      "exit_code": 0,
+      "what_was_measured": "At model revision f0e1c1e04d40177e4673a22097036854f536e9c0, adaptive and enabled are distinct: adaptive does not force a prefix, enabled emits <mm:think>."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..a69473368a934197e72bbf7b0794e78316c2e5ee",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 GPU was visible, but no MiniMax-M3 weights or TP=4 topology were available and no GPU inference was run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "thinking.type=adaptive is normalized to thinking_mode=enabled, forcing reasoning instead of preserving the model template's adaptive behavior.",
+    "reasoning_effort=none still sets only generic thinking/enable_thinking false keys; the MiniMax-M3 path reads thinking_mode and therefore remains ineffective."
+  ],
+  "remaining_limitations": [
+    "No MiniMax-M3 model-semantic validation because weights were unavailable.",
+    "No TP=4 or multi-GPU reproduction because only one assigned gfx950 GPU was available.",
+    "No native rebuild was applicable because the candidate changes no native source."
+  ]
+}
