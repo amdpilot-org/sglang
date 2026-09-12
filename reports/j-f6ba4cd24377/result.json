@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/39173",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/931",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/896",
+  "candidate_commit": "a007eace504e630a2bf4666fa32a78b30db0b282",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial fix. It corrects the divisible 42-token capture from eight unequal rows to seven uniform width-6 rows and fixes the independently reproduced DSV4 overlapping metadata-copy mechanism. It does not make Engram layout-aware: genuine compact-ragged tiers remain incompatible with the issue-described equal-block Engram contract, and the full DeepSeek-V4.1-Flash first-forward path was not run.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f6ba4cd24377/venv/bin/python inline base layout reproduction at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "The actual base build_capture_verify_lens helper produced 42 tokens / 8 slots -> [6,6,5,5,5,5,5,5], matching the reported capture geometry. It also produced the recorded 41/43/47 boundary layouts. Evidence: raw/base-environment-and-repro.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6ba4cd24377/venv/bin/python inline base DSV4 overlap reproduction at 358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "DSV4RawVerifyMetadata.copy_ and DSV4RawDecodeMetadata.copy_ both raised the reported overlapping-storage RuntimeError on MI355X tensors. Evidence: raw/base-metadata-overlap.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6ba4cd24377/venv/bin/python -m pytest -q test/registered/spec/dspark/test_ragged_verify.py test/registered/unit/layers/test_dsv4_metadata_copy.py at a007eace504e630a2bf4666fa32a78b30db0b282",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression suite passed: 14 tests and 8 subtests. Evidence: raw/candidate-regression-tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f6ba4cd24377/venv/bin/python inline candidate adversarial boundary and GPU overlap checks at a007eace504e630a2bf4666fa32a78b30db0b282",
+      "exit_code": 0,
+      "what_was_measured": "Actual candidate helpers were checked for tiers 1,5,6,7,11,12,13,40,41,42,43,47,48 and invalid geometry. The 42-token tier is uniform, while 41/43/47 remain non-uniform. Both DSV4 metadata classes copied overlapping MI355X views correctly. Evidence: raw/candidate-imports-and-adversarial.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Base failure and candidate success for overlapping DSV4 metadata views ran on AMD Instinct MI355X tensors using PyTorch 2.11.0+rocm7.2 / HIP 7.2.26015.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At width 6, 41 tokens use seven rows [6,6,6,6,6,6,5], violating the issue-described equal-block Engram contract.",
+    "At width 6, 43 tokens use eight rows [6,6,6,5,5,5,5,5], violating the issue-described equal-block Engram contract.",
+    "At width 6, 47 tokens use eight rows [6,6,6,6,6,6,6,5], violating the issue-described equal-block Engram contract.",
+    "No Engram implementation is present, so per-request hash context and numerical hash outputs cannot be compared with an independent reference.",
+    "The full first-forward path after capture was not run with DeepSeek-V4.1-Flash; only the isolated real-device DSV4 overlap mechanism was validated."
+  ],
+  "remaining_limitations": [
+    "The checkout contains no EngramHasher, layers/engram.py, or DeepSeek-V4.1 Engram integration.",
+    "The DeepSeek-V4.1-Flash weights and reported four-node NVIDIA GB10 TP4/EP4 CUDA deployment are unavailable on the assigned single AMD ROCm GPU.",
+    "CUDA graph capture and an end-to-end first request for the reported architecture remain unverified.",
+    "No native C++, FlyDSL, or LLVM source changed; native rebuild was not applicable."
+  ],
+  "source_paths": [
+    "python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py",
+    "python/sglang/srt/speculative/ragged_verify.py",
+    "python/sglang/srt/layers/attention/deepseek_v4_backend.py"
+  ],
+  "native_paths": []
+}
