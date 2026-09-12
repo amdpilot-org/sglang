@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33505",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "c44430d3a88b2ae1d2c8bd7cae34f4f955f3d0bf",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is test/report-only hardening around a one-level PretrainedConfig update already present on the recorded base. Its issue-shaped full rope_parameters replacement passes, but an independent deeper partial override discards an unmentioned nested sibling, so it does not prove or implement recursive merging.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b31b03e68ed4/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers_loading.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Recorded base suite: 4 passed plus 2 processor subtests; confirms the prepared base already has the one-level nested PretrainedConfig fix."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b31b03e68ed4/venv/bin/python -m pytest -q test/registered/unit/utils/test_hf_transformers_loading.py (candidate c44430d)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate suite: 5 passed plus 2 processor subtests, including the reported complete rope_parameters shape and scalar/plain-dict replacement boundaries."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b31b03e68ed4/venv/bin/python /job/review-evidence/adversarial_recursive.py (candidate c44430d)",
+      "exit_code": 1,
+      "what_was_measured": "A partial override of text_config.rope_parameters.rope_theta yielded only {rope_theta: 20000.0}; the existing rope_type sibling was discarded, contradicting recursive merge semantics."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 c44430d3a88b2ae1d2c8bd7cae34f4f955f3d0bf",
+      "exit_code": 2,
+      "what_was_measured": "Candidate report artifact reports/j-8a58c3effab9/raw/pytest_hf_transformers_loading.txt contains trailing whitespace on line 5."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Configuration loading tests are CPU-only. Environment inspection found one AMD Instinct MI355X gfx950 with torch 2.11.0+rocm7.2; the reported TP=2 RTX 5090 CUDA workload is unavailable."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Given existing rope_parameters {rope_type: default, rope_theta: 10000.0}, overriding only text_config.rope_parameters.rope_theta with 20000.0 discards rope_type instead of recursively preserving it."
+  ],
+  "remaining_limitations": [
+    "The nvidia/Qwen3.6-27B-NVFP4 weights were unavailable.",
+    "The reported two-GPU RTX 5090 CUDA/NVFP4 TP=2 serving path cannot be reproduced on the assigned single AMD gfx950 GPU.",
+    "No claims are made about full server startup, NVFP4 execution, distributed behavior, or model semantic accuracy.",
+    "No native code changed, so a native rebuild was not applicable."
+  ]
+}
+
