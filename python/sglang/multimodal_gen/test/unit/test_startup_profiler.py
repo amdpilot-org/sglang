@@ -1,5 +1,9 @@
 import time
+from unittest.mock import patch
 
+import pytest
+
+import sglang.multimodal_gen.runtime.utils.startup_profiler as startup_profiler
 from sglang.multimodal_gen.runtime.utils.startup_profiler import StartupProfiler
 
 
@@ -7,11 +11,13 @@ def test_disabled_profiler_is_zero_overhead_noop():
     """When disabled, phase() must not build a tree at all (see #19087 -- the
     profiler must cost nothing when off, since it wraps hot startup code)."""
     profiler = StartupProfiler(enabled=False)
-    with profiler.phase("a"):
-        with profiler.phase("b"):
-            pass
+    with patch.object(startup_profiler.time, "perf_counter") as perf_counter:
+        with profiler.phase("a"):
+            with profiler.phase("b"):
+                pass
     assert profiler._root.children == []
     assert profiler.render() == ""
+    perf_counter.assert_not_called()
 
 
 def test_nested_phases_report_percent_of_immediate_parent():
@@ -52,3 +58,36 @@ def test_sibling_phases_at_top_level_are_independent():
     lines = profiler.render().splitlines()
     assert lines[0].startswith("first: ")
     assert lines[1].startswith("second: ")
+
+
+def test_exception_restores_parent_phase_stack():
+    profiler = StartupProfiler(enabled=True)
+    with pytest.raises(RuntimeError, match="expected"):
+        with profiler.phase("outer"):
+            with profiler.phase("failing"):
+                raise RuntimeError("expected")
+
+    assert profiler._stack == [profiler._root]
+    assert [node.name for node in profiler._root.children] == ["outer"]
+    assert [node.name for node in profiler._root.children[0].children] == ["failing"]
+
+
+def test_global_profiler_is_reset_after_fork():
+    """A forked worker must not inherit the parent's open phase stack."""
+    old_profiler = startup_profiler._profiler
+    old_pid = startup_profiler._profiler_pid
+    try:
+        with patch.object(startup_profiler.envs, "SGLANG_DIFFUSION_STARTUP_PROFILE", True):
+            with patch.object(startup_profiler.os, "getpid", return_value=100):
+                parent = startup_profiler.get_startup_profiler()
+                parent._stack.append(startup_profiler._Phase("parent_open_phase"))
+
+            with patch.object(startup_profiler.os, "getpid", return_value=101):
+                child = startup_profiler.get_startup_profiler()
+
+        assert child is not parent
+        assert child._stack == [child._root]
+        assert child._root.children == []
+    finally:
+        startup_profiler._profiler = old_profiler
+        startup_profiler._profiler_pid = old_pid
