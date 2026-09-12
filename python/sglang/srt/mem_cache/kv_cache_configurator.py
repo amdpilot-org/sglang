@@ -159,17 +159,14 @@ def mm_runtime_reservation_gb(
     return reserved_mb / 1024
 
 
-# base ratio of mamba pool size to max_running_requests. Under
-# With SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK the decode-time skip frees one resident slot
-# per running request, so the base drops by 1 (overlap 5->4, lazy 4->3). no_buffer
-# stays at effective 3 either way: its binding limit is the prefill->decode peak,
-# which the decode-time drop does not shrink.
+# The base covers the admission-time peak: a request-owned state, its locked
+# matched-prefix state, and a donated state during the prefill-to-decode handoff.
+# Skipping the matched-prefix lock during decode lowers steady-state occupancy,
+# but happens too late to reduce this admission requirement.
 MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO = 3
-MAMBA_CACHE_BASE_RATIO_DROP_ON_SKIP = 1
 MAMBA_CACHE_V2_ADDITIONAL_RATIO_OVERLAP = 2
 MAMBA_CACHE_V2_ADDITIONAL_RATIO_OVERLAP_LAZY = 1
 MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_OVERLAP = 1
-MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_BUFFER = 1
 
 
 def _pp_local_per_request_bytes(
@@ -2214,10 +2211,7 @@ class KVCacheConfigurator:
         if get_memory().disable_radix_cache:
             return 1
 
-        skip_decode_lock = envs.SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK.get()
-        base = MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO - (
-            MAMBA_CACHE_BASE_RATIO_DROP_ON_SKIP if skip_decode_lock else 0
-        )
+        base = MAMBA_CACHE_SIZE_MAX_RUNNING_REQUESTS_RATIO
 
         additional_ratio = 0
         if get_exec().mamba.enable_mamba_extra_buffer:
@@ -2233,12 +2227,6 @@ class KVCacheConfigurator:
                     "Lazy extra buffer requires overlap schedule (--disable-overlap-schedule is incompatible)"
                 )
                 additional_ratio = MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_OVERLAP
-        elif skip_decode_lock:
-            # no_buffer under skip: add the base drop back so effective stays 3,
-            # the prefill->decode peak needs ~3 slots/req and this leaf-only mode
-            # has no ping-pong to absorb it.
-            additional_ratio = MAMBA_CACHE_V2_ADDITIONAL_RATIO_NO_BUFFER
-
         return base + additional_ratio
 
     def _apply_token_constraints(self, token_capacity: int) -> int:
