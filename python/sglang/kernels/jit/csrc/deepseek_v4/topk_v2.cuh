@@ -73,6 +73,14 @@ static_assert(kMinWavesPerSimd > 0, "kBlockSize must cover at least one wave per
 constexpr uint32_t kClusterFloor = 65536;
 constexpr uint32_t kClusterMaxBatch = 512;
 constexpr uint32_t kNumPersistentClusters = 15 * kOccupancy;
+#ifndef USE_ROCM
+// TopKCluster cannot exactly resolve a threshold coarse bin with more than
+// kMaxNumTie candidates: each rank truncates its arrival-order subset before
+// the primary rank calls handle_tie. Keep the implementation available for a
+// future cluster-wide refinement, but do not dispatch correctness-sensitive
+// work to it in the meantime. TopKStreaming uses the exact-key overflow path.
+constexpr bool kEnableClusterPath = false;
+#endif
 
 /// Metadata tensor rows (each 8 B / 2 int32). Row 0 is the global plan result;
 /// rows 1..N are the (batch_id, seq_len) of items routed to the cluster pool.
@@ -579,7 +587,8 @@ struct TopKKernel {
     };
 
 #ifndef USE_ROCM
-    const bool use_cluster = (max_seq_len > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
+    const bool use_cluster =
+        kEnableClusterPath && (max_seq_len > params.cluster_floor) && (batch_size <= kClusterMaxBatch);
 #endif
     constexpr bool kUsePDL = true;
     const auto mode = page_table.has_value() ? TopKMode::PAGE_TABLE : TopKMode::INDICES;

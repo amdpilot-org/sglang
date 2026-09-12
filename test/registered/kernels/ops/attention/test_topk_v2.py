@@ -338,6 +338,31 @@ def test_topk_v2_single_coarse_bin_is_exact(batch: int, seq: int, dist: str) -> 
     )
 
 
+@torch.inference_mode()
+def test_topk_v2_original_long_single_row_is_exact() -> None:
+    """The issue's batch-1, 262K shape must use an exact implementation.
+
+    CUDA previously dispatched this shape to TopKCluster, whose per-rank and
+    cluster-wide tie staging truncate an overflowing coarse bin. ROCm has no
+    cluster implementation, but runs the same long-row numerical regression
+    through TopKStreaming.
+    """
+    device = "cuda"
+    seq = 262_144
+    k = 2048
+    scores = torch.full((1, seq), -100.0, dtype=torch.float32, device=device)
+    scores[0, :50_000] = 1.0 + torch.arange(
+        50_000, dtype=torch.float32, device=device
+    ) * torch.finfo(torch.float32).eps
+    seq_lens = torch.tensor([seq], dtype=torch.int32, device=device)
+
+    our_raw = _run_raw(scores, seq_lens, k)
+    ref_raw = _reference(scores, seq_lens, k)
+    _assert_topk_close(
+        scores.cpu(), ref_raw, our_raw, 1, seq_lens.cpu(), k, max_permit_error=0
+    )
+
+
 # --- ragged entry point ------------------------------------------------------
 # Rows select inside `[row_start, row_start + seq_len)` of their score row and
 # emit `position + offset`. The window start is an arbitrary token offset, so

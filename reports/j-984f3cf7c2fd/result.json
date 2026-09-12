@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35257",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1599",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1483",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1561",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the candidate review at exact commit d501752c27de267fbc85dce32832d2a59cdba8bd. The candidate exactly fixes register and streaming overflow on gfx950 but leaves the CUDA-only TopKCluster truncation unchanged. Preserved its valid exact-key refinement and disabled CUDA cluster dispatch, routing affected long rows through the verified streaming path. This is a correctness-first fallback with a CUDA long-row performance limitation.",
+  "tests": [
+    {
+      "command": "git show 11aeb32eed938317d136dff87dbe751d010e7b94:reports/j-25b6a2c6b1b5/evidence/review_harness.py | PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-984f3cf7c2fd/jit-base /tmp/amdpilot-repo-j-984f3cf7c2fd/venv/bin/python -",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before on the prepared base: the 8192, 32768, and 262144 overflow rows each had 2048/2048 selected-value mismatches; 2049 candidates had 2047 mismatches. The 2048 boundary and exact-tie control had zero mismatches."
+    },
+    {
+      "command": "git checkout --detach d501752c27de267fbc85dce32832d2a59cdba8bd && git show 11aeb32eed938317d136dff87dbe751d010e7b94:reports/j-25b6a2c6b1b5/evidence/review_harness.py | PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-984f3cf7c2fd/jit-candidate /tmp/amdpilot-repo-j-984f3cf7c2fd/venv/bin/python -",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate verification: all eight independent register/streaming, boundary, exact-tie, long-row, and signed-subnormal cases had zero value-multiset mismatches versus torch.topk."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-984f3cf7c2fd/jit-after-v1 /tmp/amdpilot-repo-j-984f3cf7c2fd/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_topk_v2.py -k 'single_coarse_bin_is_exact or original_long_single_row_is_exact'",
+      "exit_code": 0,
+      "what_was_measured": "11 focused exactness tests passed on gfx950, including the dedicated batch-1, N=262144, 50,000-distinct-value regression."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-984f3cf7c2fd/jit-after-v1 /tmp/amdpilot-repo-j-984f3cf7c2fd/venv/bin/python -m pytest -q test/registered/kernels/ops/attention/test_topk_v2.py",
+      "exit_code": 0,
+      "what_was_measured": "All 289 tests in test_topk_v2.py passed on the assigned gfx950 GPU."
+    },
+    {
+      "command": "find /tmp/amdpilot-repo-j-984f3cf7c2fd/jit-after-v1 -type f -name 'sgl_kernel_jit_dpsk_v4_topk_v2.so'",
+      "exit_code": 0,
+      "what_was_measured": "Fresh private JIT artifact: /tmp/amdpilot-repo-j-984f3cf7c2fd/jit-after-v1/gfx950/sgl_kernel_jit_dpsk_v4_topk_v2/build-1c0bbbf867283d2f/deps-ad0887c9b117dbfa/sgl_kernel_jit_dpsk_v4_topk_v2.so."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Failing-before, exact-candidate, focused after, and full-suite numerical tests ran on one AMD Instinct MI355X, gfx950:sramecc+:xnack-, with torch 2.11.0+rocm7.2 and HIP 7.2.26015."
+  },
+  "native_rebuilt": true,
+  "remaining_limitations": [
+    "No CUDA/B200 device was available. The CUDA cluster counterexample was established from dispatch and source inspection, and the correction avoids that path, but CUDA compilation/runtime and the performance impact were not measured.",
+    "Disabling TopKCluster can reduce CUDA performance for long rows and small batches; correctness is provided by TopKStreaming until a cluster-wide exact refinement is implemented and validated.",
+    "No GLM-5.2 weights, reported real score dumps, TP8, or multi-node environment were available; no full-model or workload-level claim is made."
+  ]
+}
