@@ -1,0 +1,80 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /tmp/amdpilot-repo-j-c4c3fd74f1ba/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /job/repo/test
+configfile: pytest.ini
+plugins: hypothesis-6.155.0, anyio-4.15.1
+collecting ... collected 249 items / 246 deselected / 3 selected
+
+test/registered/layers/mamba/test_causal_conv1d.py::test_causal_conv1d_update_state_layouts[2-8-3-None] PASSED [ 33%]
+test/registered/layers/mamba/test_causal_conv1d.py::test_causal_conv1d_update_state_layouts[3-4-3-2] FAILED [ 66%]
+test/registered/layers/mamba/test_causal_conv1d.py::test_causal_conv1d_update_rejects_unsupported_width PASSED [100%]
+
+=================================== FAILURES ===================================
+_______________ test_causal_conv1d_update_state_layouts[3-4-3-2] _______________
+
+width = 3, state_len = 4, seqlen = 3, cache_cursor = 2
+
+    @pytest.mark.parametrize(
+        ("width", "state_len", "seqlen", "cache_cursor"),
+        [(2, 8, 3, None), (3, 4, 3, 2)],
+    )
+    def test_causal_conv1d_update_state_layouts(
+        width, state_len, seqlen, cache_cursor
+    ):
+        """Oversized linear and circular states match an independent conv reference."""
+        device = get_device()
+        torch.manual_seed(41)
+        batch, dim = 1, 32
+        x = torch.randn(batch, dim, seqlen, device=device, dtype=torch.float32)
+        conv_state = torch.randn(
+            batch, dim, state_len, device=device, dtype=torch.float32
+        )
+        weight = torch.randn(dim, width, device=device, dtype=torch.float32)
+        cache_seqlens = (
+            None
+            if cache_cursor is None
+            else torch.full(
+                (batch,), cache_cursor, dtype=torch.int32, device=device
+            )
+        )
+        conv_state_ptr = conv_state.data_ptr()
+        conv_state_ref = conv_state.clone()
+    
+        out = causal_conv1d_update(
+            x, conv_state, weight, cache_seqlens=cache_seqlens
+        )
+        out_ref = causal_conv1d_update_ref(
+            x, conv_state_ref, weight, cache_seqlens=cache_seqlens
+        )
+    
+        assert conv_state.data_ptr() == conv_state_ptr
+        torch.testing.assert_close(out, out_ref, rtol=3e-4, atol=1e-3)
+>       torch.testing.assert_close(conv_state, conv_state_ref, rtol=0, atol=0)
+E       AssertionError: Tensor-likes are not equal!
+E       
+E       Mismatched elements: 32 / 128 (25.0%)
+E       Greatest absolute difference: 3.287586212158203 at index (0, 22, 1)
+E       Greatest relative difference: 27.63361930847168 at index (0, 12, 1)
+
+test/registered/layers/mamba/test_causal_conv1d.py:278: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/layers/mamba/test_causal_conv1d.py::test_causal_conv1d_update_state_layouts[3-4-3-2]
+=========== 1 failed, 2 passed, 246 deselected, 17 warnings in 7.73s ===========

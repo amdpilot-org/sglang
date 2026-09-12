@@ -634,6 +634,7 @@ def _causal_conv1d_update_kernel(
     HAS_BIAS: tl.constexpr,
     KERNEL_WIDTH: tl.constexpr,
     SILU_ACTIVATION: tl.constexpr,
+    HAS_CACHE_SEQLENS: tl.constexpr,
     IS_CONTINUOUS_BATCHING: tl.constexpr,
     IS_SPEC_DECODING: tl.constexpr,
     NP2_STATELEN: tl.constexpr,
@@ -699,19 +700,35 @@ def _causal_conv1d_update_kernel(
     )
     mask_w = idx_feats < dim
 
-    prior_tokens = conv_states_base + conv_state_token_offset * stride_conv_state_tok
+    if HAS_CACHE_SEQLENS:
+        cache_seqlen = tl.load(cache_seqlens_ptr + idx_seq).to(tl.int64)
+        cache_pos = cache_seqlen % state_len
+        history_start = (cache_pos + state_len - (KERNEL_WIDTH - 1)) % state_len
+    elif IS_SPEC_DECODING:
+        history_start = conv_state_token_offset
+    else:
+        history_start = state_len - (KERNEL_WIDTH - 1)
+
+    prior_tokens = conv_states_base + history_start * stride_conv_state_tok
     if KERNEL_WIDTH >= 2:
-        conv_states_ptrs = prior_tokens  # [BLOCK_N]
+        conv_states_ptrs = prior_tokens
         col0 = tl.load(conv_states_ptrs, mask_w, 0.0)
     if KERNEL_WIDTH >= 3:
-        conv_states_ptrs = prior_tokens + 1 * stride_conv_state_tok  # [BLOCK_N]
+        history_idx = (history_start + 1) % state_len if HAS_CACHE_SEQLENS else 1
+        conv_states_ptrs = (
+            conv_states_base + history_idx * stride_conv_state_tok
+            if HAS_CACHE_SEQLENS
+            else prior_tokens + stride_conv_state_tok
+        )
         col1 = tl.load(conv_states_ptrs, mask_w, 0.0)
     if KERNEL_WIDTH >= 4:
-        conv_states_ptrs = prior_tokens + 2 * stride_conv_state_tok  # [BLOCK_N]
+        history_idx = (history_start + 2) % state_len if HAS_CACHE_SEQLENS else 2
+        conv_states_ptrs = (
+            conv_states_base + history_idx * stride_conv_state_tok
+            if HAS_CACHE_SEQLENS
+            else prior_tokens + 2 * stride_conv_state_tok
+        )
         col2 = tl.load(conv_states_ptrs, mask_w, 0.0)
-    if KERNEL_WIDTH == 5:
-        conv_states_ptrs = prior_tokens + 3 * stride_conv_state_tok  # [BLOCK_N]
-        col3 = tl.load(conv_states_ptrs, mask_w, 0.0)
 
     # STEP 2: assume state_len > seqlen
     idx_tokens = tl.arange(0, NP2_STATELEN)  # [BLOCK_M]
@@ -719,38 +736,45 @@ def _causal_conv1d_update_kernel(
     # The conv_state updates works in a sliding window manner,
     # at each forward pass, the tokens are shift by 1, so we
     # load since idx_tokens + 1.
-    conv_state_ptrs_source = (
-        conv_state_ptr
-        + (conv_state_batch_coord * stride_conv_state_seq)
-        + conv_state_token_offset * stride_conv_state_tok
-        + (idx_feats * stride_conv_state_dim)[None, :]
-        + ((idx_tokens + (1 if IS_SPEC_DECODING else seqlen)) * stride_conv_state_tok)[
-            :, None
-        ]
-    )  # [BLOCK_M, BLOCK_N]
-    mask = (
-        (conv_state_batch_coord < num_cache_lines)
-        & ((idx_tokens + seqlen) < state_len)[:, None]
-        & (idx_feats < dim)[None, :]
-    )
-    conv_state = tl.load(conv_state_ptrs_source, mask, other=0.0)
+    if HAS_CACHE_SEQLENS:
+        conv_state_ptrs_source = (
+            conv_states_base[None, :]
+            + idx_tokens[:, None] * stride_conv_state_tok
+        )
+        state_mask = (idx_tokens < state_len)[:, None] & mask_w[None, :]
+        conv_state = tl.load(conv_state_ptrs_source, state_mask, other=0.0)
+        relative_idx = (idx_tokens + state_len - cache_pos) % state_len
+        x_idx = relative_idx + ((seqlen - 1 - relative_idx) // state_len) * state_len
+        replace_mask = (relative_idx < seqlen)[:, None]
+    else:
+        conv_state_ptrs_source = (
+            conv_state_ptr
+            + (conv_state_batch_coord * stride_conv_state_seq)
+            + conv_state_token_offset * stride_conv_state_tok
+            + (idx_feats * stride_conv_state_dim)[None, :]
+            + (
+                (idx_tokens + (1 if IS_SPEC_DECODING else seqlen))
+                * stride_conv_state_tok
+            )[:, None]
+        )
+        state_mask = (
+            (conv_state_batch_coord < num_cache_lines)
+            & ((idx_tokens + seqlen) < state_len)[:, None]
+            & mask_w[None, :]
+        )
+        conv_state = tl.load(conv_state_ptrs_source, state_mask, other=0.0)
+        x_idx = idx_tokens - (state_len - seqlen)
+        replace_mask = (x_idx >= 0)[:, None] & (x_idx < seqlen)[:, None]
 
-    VAL = state_len - seqlen
     x_base = x_ptr + (idx_seq * stride_x_seq) + (idx_feats * stride_x_dim)  # [BLOCK_N]
 
-    x_ptrs = (
-        x_base[None, :] + ((idx_tokens - VAL) * stride_x_token)[:, None]
-    )  # [BLOCK_M, BLOCK_N]
+    x_ptrs = x_base[None, :] + (x_idx * stride_x_token)[:, None]
 
-    mask_x = (
-        (idx_tokens - VAL >= 0)[:, None]
-        & (idx_tokens - VAL < seqlen)[:, None]
-        & (idx_feats < dim)[None, :]
-    )  # token-index  # token-index  # feature-index
+    mask_x = replace_mask & mask_w[None, :]
     loaded_x = tl.load(x_ptrs, mask_x, 0.0)
     tl.debug_barrier()
 
-    new_conv_state = tl.where(mask, conv_state, loaded_x)
+    new_conv_state = tl.where(replace_mask, loaded_x, conv_state)
 
     conv_state_base = (
         conv_state_ptr
@@ -1040,7 +1064,6 @@ def causal_conv1d_update(
     out: (batch, dim) or (batch, dim, seqlen)
     """
     if validate_data:
-        assert cache_seqlens is None  # not implemented yet - ok for vLLM
         assert pad_slot_id is not None
         assert x.stride(1) == 1
     if isinstance(activation, bool):
@@ -1053,8 +1076,18 @@ def causal_conv1d_update(
         x = x.unsqueeze(-1)
     batch, dim, seqlen = x.shape
     _, width = weight.shape
+    if not 2 <= width <= 4:
+        raise ValueError(
+            f"causal_conv1d_update: width must be between 2 and 4, got {width}"
+        )
     # conv_state: (..., dim, state_len), where state_len >= width - 1
     num_cache_lines, _, state_len = conv_state.size()
+    if state_len < width - 1:
+        raise ValueError(
+            "causal_conv1d_update: conv_state length must be at least width - 1"
+        )
+    if cache_seqlens is not None and num_accept_tokens is not None:
+        raise ValueError("circular state is not supported with speculative decoding")
 
     if validate_data:
         assert dim == weight.size(0)
@@ -1073,7 +1106,9 @@ def causal_conv1d_update(
 
         assert num_cache_lines >= batch
         assert weight.stride(1) == 1  # Need this
-        assert cache_seqlens is None  # not needed for vLLM - circular buffer
+        if cache_seqlens is not None:
+            assert cache_seqlens.shape == (batch,)
+            assert cache_seqlens.dtype == torch.int32
 
     # adopt the strategy in vLLM that overwrite on 'x' directly, rather than creating a new tensor 'o'
     out = torch.empty_like(x)
@@ -1093,8 +1128,6 @@ def causal_conv1d_update(
     )
     if num_accept_tokens is not None:
         state_len = width - 1 + (seqlen - 1)  # effective state_len needed
-    else:
-        state_len = width - 1
     np2_statelen = triton.next_power_of_2(state_len)
     np2_seqlen = triton.next_power_of_2(seqlen)
 
@@ -1195,6 +1228,7 @@ def causal_conv1d_update(
         HAS_BIAS=bias is not None,
         KERNEL_WIDTH=width,
         SILU_ACTIVATION=activation in ["silu", "swish"],
+        HAS_CACHE_SEQLENS=cache_seqlens is not None,
         IS_CONTINUOUS_BATCHING=conv_state_indices is not None,
         IS_SPEC_DECODING=num_accept_tokens is not None,
         NP2_STATELEN=np2_statelen,
