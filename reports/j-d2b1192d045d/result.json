@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31327",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "Independently reviewed amdpilot-org/sglang PR 2788 at exact commit 6919f2e20ec866a7df61897448ff7f7c86d60904. The recorded base lacks the requested panel. The candidate adds a separate token-weighted prefix-cache panel using the requested prefill cache and compute counters while leaving the existing Cache Hit Rate panel byte-for-byte unchanged. Candidate tests and independent adversarial checks passed. This is a full fix of the dashboard-only original issue, not merely test hardening. The documented zero-prefill 0/0 no-data behavior is not a counterexample to the requested contract.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-d2b1192d045d/venv/bin/python < independent base contract script at recorded base",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base preserved the legacy Cache Hit Rate panel but lacked Token-weighted Prefix Cache Hit Rate. Raw output: /job/review-evidence-j-d2b1192d045d/base-contract.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2b1192d045d/venv/bin/python -m pytest -q test/registered/unit/observability/test_grafana_dashboard.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit, all three candidate regression tests passed: exact PromQL, legacy-panel preservation, decode/batch-average exclusion, mixed-traffic arithmetic, percent bounds, unique IDs, and non-overlapping layout. Raw output: /job/review-evidence-j-d2b1192d045d/candidate-pytest.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2b1192d045d/venv/bin/python < independent adversarial dashboard script at exact candidate commit",
+      "exit_code": 0,
+      "what_was_measured": "Independent review verified the exact counter ratio, byte-for-byte preservation of the old panel, 0%, 30%, mixed-traffic, and 100% numerical cases, decode exclusion, bounds, IDs, and layout. Raw output: /job/review-evidence-j-d2b1192d045d/independent-adversarial.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-d2b1192d045d/venv/bin/python -m json.tool examples/monitoring/grafana/dashboards/json/sglang-dashboard.json",
+      "exit_code": 0,
+      "what_was_measured": "The candidate dashboard parsed as valid JSON. Raw output: /job/review-evidence-j-d2b1192d045d/json-tool.out"
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..6919f2e20ec866a7df61897448ff7f7c86d60904",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate diff contains no whitespace errors. Raw output: /job/review-evidence-j-d2b1192d045d/diff-check.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "Not applicable: the original contract and candidate affect only static Grafana dashboard JSON and CPU-side tests. No model, kernel, numerical GPU, HTTP serving, or distributed path is changed. GPU execution would not validate PromQL/dashboard semantics.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live Grafana/Prometheus stack was provisioned, so visual rendering and live time-series evaluation were not exercised; JSON structure, source counter definitions, exact query semantics, and arithmetic were checked independently.",
+    "An interval with no prefill tokens has a zero denominator and therefore yields Prometheus no-data/NaN rather than a fabricated percentage; the candidate explicitly records this behavior.",
+    "The raw prometheus_client exposition preserves colon-form metric names, while the repository dashboard consistently uses underscore-form queries. The candidate follows the established dashboard convention and the open related upstream PR, but this review did not stand up the full scrape pipeline to observe its negotiated/relabelled series names.",
+    "Architecture-specific GPU/model, distributed, and serving paths were not run because they are outside this dashboard-only issue. repository-environment.json records native and wheel as null; the candidate changes no C++/native source, so no native rebuild exists or is required."
+  ]
+}
