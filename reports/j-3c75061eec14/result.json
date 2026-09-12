@@ -1,0 +1,52 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30609",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate correctly enables the already-present Mooncake index batching by default and passes focused and independent boundary tests. This is credible partial hardening, but it does not verify or fully resolve the original GLM-5.2 FP8, H100, multi-node DSA/HiCache/HiSparse/DeepEP failure. Its report overstates the result as fixed and incorrectly treats stale upstream PR prose as proof that the merged implementation used or validated a global 1024 default.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3c75061eec14/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (recorded base)",
+      "exit_code": 0,
+      "what_was_measured": "The base's opt-in batching implementation passed 5 tests and 3 subtests, while a direct prepared-source import measured the default as 0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3c75061eec14/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_mooncake_transfer_batching.py (candidate b8902dbde7a9d707fc5729883551ed082c110baa)",
+      "exit_code": 0,
+      "what_was_measured": "The candidate regression and batching suite passed 6 tests and 3 subtests using modules imported from /job/repo."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3c75061eec14/venv/bin/python /job/review-evidence-j-3c75061eec14/independent_candidate_checks.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent 1023/1024/1025/2049-index boundaries, ordering and byte coverage, explicit-zero legacy behavior, and nonzero failure short-circuiting."
+    },
+    {
+      "command": "SGLANG_MOONCAKE_MAX_TRANSFER_BATCH_INDICES={0,17} prepared-python environment assertions",
+      "exit_code": 0,
+      "what_was_measured": "Explicit legacy disable and positive override remain functional."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3c75061eec14/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_receiver_connection_pool.py test/registered/unit/disaggregation/test_nixl_sender_failure_cleanup.py test/registered/unit/disaggregation/test_decode_queue_cleanup.py test/registered/unit/disaggregation/test_deferred_decode_kv_release.py test/registered/unit/disaggregation/test_nixl_deferred_kv_release.py",
+      "exit_code": 0,
+      "what_was_measured": "40 related disaggregation timeout, cleanup, and deferred-release tests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The available device is one AMD Instinct MI355X gfx950, not the reported H100 fleet. No relevant multi-node Mooncake/RDMA or GLM-5.2 fixture was available; an unrelated GPU smoke would not validate the issue."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The original glm5.2-fp8 deployment was not reproduced before or after the candidate; upstream PR 32758 discussion explicitly says its failure was not reproduced on FP8.",
+    "The original 2-node prefill and 4-node/32-rank decode topology with H100, Mooncake/RDMA, DSA, HiCache, HiSparse, and DeepEP remains untested.",
+    "A source-issue follow-up reports freezing specifically when --moe-a2a-backend deepep is enabled; changing Mooncake transfer batch size does not independently establish that this path is fixed.",
+    "The 1024 global default was measured on GLM-5.2-NVFP4 and its per-index byte size; safety and efficacy for other models and KV layouts were not independently demonstrated."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X gfx950 GPU was available; the report used NVIDIA H100 hardware.",
+    "GLM-5.2 weights and Mooncake/RDMA peers were unavailable.",
+    "No full model, semantic accuracy, or distributed execution claim is made.",
+    "No native code changed and repository-environment.json lists no native artifact, so native rebuilding was not applicable."
+  ]
+}
