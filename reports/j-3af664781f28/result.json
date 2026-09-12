@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34920",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1562",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1523",
+  "candidate_commit": "dc8a878577b35c207a96d45ad671584be75f925b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the normal reported DSpark target-verify metadata shape and passes the real DCP planner, but mishandles the same caller's supported nxt_kv_lens_cpu fallback by reusing an already-expanded host mirror as prefix lengths. This leaves GPU and CPU prefix geometry inconsistent, so the change is a partial fix requiring revision.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3af664781f28/venv/bin/python direct base call to prepare_decode_context_parallel_metadata with extend_prefix_lens=None on gfx950",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original TypeError at the actual base planner torch.cumsum call."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3af664781f28/venv/bin/python -m pytest -q test/registered/unit/model_executor/runner/test_eager_dcp_target_verify.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 5 passed, including its CUDA-device parameter on ROCm/gfx950."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3af664781f28/venv/bin/python independent candidate call through _get_dcp_extend_metadata and the actual DCP planner on gfx950",
+      "exit_code": 0,
+      "what_was_measured": "Reported normal geometry produced total lengths [18, 30], a [48, 1] KV buffer, and prefix sum 34 instead of cumsum(None); index kernels were mocked to isolate metadata."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3af664781f28/venv/bin/python independent nxt_kv_lens_cpu fallback assertion",
+      "exit_code": 1,
+      "what_was_measured": "For committed GPU prefix [3], expanded ForwardBatch host mirror [10], and width 7, candidate returned prefix_cpu [10] instead of [3], proving inconsistent planner geometry."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI350X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2; real GPU tensors and planner allocation were exercised."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "DSpark non-compact verify with batch.seq_lens_cpu absent and draft_input.nxt_kv_lens_cpu present snapshots expanded total host lengths; candidate incorrectly returns those totals as extend_prefix_lens_cpu, inconsistent with the committed GPU prefix tensor."
+  ],
+  "remaining_limitations": [
+    "No Kimi K3 weights or full serving reproduction.",
+    "One AMD gfx950 GPU, not the reported eight-B300-per-side CUDA topology.",
+    "No Mooncake PD disaggregation, TP/EP/DCP 8, multi-node, or semantic accuracy validation.",
+    "Planner GPU test mocked index-generation kernels to isolate the reported metadata handoff.",
+    "No native rebuild was needed because the candidate changes only Python and report/test files."
+  ]
+}
