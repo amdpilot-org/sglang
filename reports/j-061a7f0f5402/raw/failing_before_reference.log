@@ -1,0 +1,160 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestTritonAttention.test_extend_attention_unified_xai_temperature_reference __
+
+self = <test_triton_attention_kernels.TestTritonAttention testMethod=test_extend_attention_unified_xai_temperature_reference>
+
+    def test_extend_attention_unified_xai_temperature_reference(self):
+        """Check xAI scaling below, at, and above its configured threshold."""
+        device = get_device()
+        dtype = torch.float32
+        prefix_len = 3
+        extend_len = 4
+        threshold = 4
+        num_heads = 4
+        head_dim = 32
+    
+        torch.manual_seed(0)
+        q = torch.randn(
+            (extend_len, num_heads, head_dim), dtype=dtype, device=device
+        )
+        k_buffer = torch.randn(
+            (prefix_len + extend_len, num_heads, head_dim),
+            dtype=dtype,
+            device=device,
+        )
+        v_buffer = torch.randn_like(k_buffer)
+        qo_indptr = torch.tensor([0, extend_len], dtype=torch.int32, device=device)
+        kv_indptr = torch.tensor(
+            [0, prefix_len + extend_len], dtype=torch.int32, device=device
+        )
+        kv_indices = torch.arange(
+            prefix_len + extend_len, dtype=torch.int64, device=device
+        )
+        prefix_lens = torch.tensor([prefix_len], dtype=torch.int32, device=device)
+    
+        output = torch.empty_like(q)
+        extend_attention_fwd_unified(
+            q,
+            output,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            prefix_lens,
+            max_len_extend=extend_len,
+            xai_temperature_len=threshold,
+        )
+    
+        positions = prefix_len + torch.arange(extend_len, device=device)
+        temperature_scale = torch.where(
+            positions > threshold,
+            torch.log2(positions.float())
+            / torch.log2(torch.tensor(float(threshold), device=device)),
+            1.0,
+        )
+        reference = torch.empty_like(q)
+        extend_attention_fwd_unified(
+            q * temperature_scale[:, None, None],
+            reference,
+            k_buffer,
+            v_buffer,
+            1.0,
+            1.0,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            prefix_lens,
+            max_len_extend=extend_len,
+            xai_temperature_len=-1,
+        )
+    
+>       self.assertTrue(
+            torch.allclose(output, reference, rtol=2e-3, atol=2e-3),
+            f"Unified xAI scaling differs from the logarithmic reference. "
+            f"Per-position max diff: "
+            f"{(output - reference).abs().amax(dim=(1, 2)).tolist()}",
+        )
+E       AssertionError: False is not true : Unified xAI scaling differs from the logarithmic reference. Per-position max diff: [0.0, 0.37117624282836914, 0.3268224895000458, 0.9590050578117371]
+
+test/registered/attention/test_triton_attention_kernels.py:1153: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x702cd0a5fb00>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7035b4109da0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/attention/test_triton_attention_kernels.py", line 1153, in test_extend_attention_unified_xai_temperature_reference
+    self.assertTrue(
+  File "/usr/lib/python3.12/unittest/case.py", line 727, in assertTrue
+    raise self.failureException(msg)
+AssertionError: False is not true : Unified xAI scaling differs from the logarithmic reference. Per-position max diff: [0.0, 0.37117624282836914, 0.3268224895000458, 0.9590050578117371]
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference
+  /opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:100: UserWarning: kpack is deprecated starting from gfx950 and will be removed in later releases. So for now kpack = 2 will be overwritten to 1 to make transitioning easier.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_xai_temperature_reference
+1 failed, 18 warnings in 9.29s
