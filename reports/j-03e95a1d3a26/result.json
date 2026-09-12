@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30314",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Preserved candidate 49a136764025c3a0ac76b2105884bbf1215e1e0b: safe decode-prefix Mamba eviction is default-on while admission-safe pool ratios remain 3/4/5. Independent base/candidate runs verify both fixes. The review's unreclaimable 2N boundary was reproduced: it makes one eviction attempt and raises synchronously, while 3N and decode-evictable 2N succeed. No further source change is justified without a faithful scheduler/HiCache hybrid-Mamba reproduction.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-03e95a1d3a26/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-03e95a1d3a26/test_mamba_donated_alloc_ratio_candidate.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before: 8 passed and 2 failed; decode lock skipping was default-off and the enabled lazy ratio was 3 instead of the admission-safe 4."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-03e95a1d3a26/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_donated_alloc_ratio.py (exact candidate/consolidated branch)",
+      "exit_code": 0,
+      "what_was_measured": "10 focused cases, including one-attempt locked 2N exhaustion, 3N success, decode-evictable 2N recovery, default-on behavior, admission ratios, lock symmetry, and PP sizing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-03e95a1d3a26/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_allocation_eviction.py",
+      "exit_code": 0,
+      "what_was_measured": "17 allocation-aware unified-cache eviction boundary cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-03e95a1d3a26/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_streaming_session_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "9 streaming-session lifecycle cases passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-03e95a1d3a26/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_init_req_max_new_tokens.py",
+      "exit_code": 0,
+      "what_was_measured": "8 tests and 542 request/token-boundary subtests passed; this suite does not establish HTTP responsiveness under Mamba pressure."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The verified behavior is CPU-side scheduler/cache accounting. No compatible hybrid-Mamba model workload was available; a generic GPU smoke would not qualify the issue."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No scheduler/HTTP regression proves graceful request rejection or completion responsiveness for an unreclaimable Mamba admission.",
+    "The zero-running post-flush exhaustion state was not reproduced or explained.",
+    "Direct hierarchical-cache I/O blocking and the reported 222-second TTFT were not reproduced.",
+    "Qwen3.5-397B-A17B-FP8, TP=8, H100/CUDA, EAGLE, 100K+ production traffic, and model semantics remain unverified.",
+    "The tiny Llama fixture cannot exercise a hybrid-Mamba allocator and is not evidence for this issue."
+  ]
+}
