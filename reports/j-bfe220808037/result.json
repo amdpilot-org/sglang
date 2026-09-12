@@ -1,0 +1,29 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32968",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The checked-out main source already contains upstream PR #32477 (merge commit ee678910f7000aa43886f218de0e159bf418f1b5): the JIT KV-cache store skips writes to reserved padding slot 0 by default. On gfx950, the default preserved slot 0 under NaN padding inputs, while the explicit opt-out reproduced the old NaN overwrite. No additional product-code correction was justified.",
+  "tests": [
+    {
+      "command": "env XDG_CACHE_HOME=/tmp/amdpilot-repo-j-bfe220808037/cache TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-bfe220808037/cache/torch_extensions SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-bfe220808037/cache/sglang_jit /tmp/amdpilot-repo-j-bfe220808037/venv/bin/python -m pytest -q test/registered/kernels/ops/kvcache/test_store_cache.py -x",
+      "exit_code": 0,
+      "what_was_measured": "358 GPU tests passed, including NaN padding-row preservation for int32/int64 indices and split counts 1/2/4, ordinary non-reserved writes, dtype/shape boundaries, and the reserved-slot opt-out."
+    },
+    {
+      "command": "standalone gfx950 store_cache numerical check recorded in reports/j-bfe220808037/raw/gfx950_reserved_slot_evidence.log",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X gfx950, default reserved-slot skipping kept K/V slot 0 bit-for-bit unchanged and wrote non-reserved slots exactly; reserved_skip_index=-1 reproduced the former behavior by writing 1024 NaNs into each reserved K/V row."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-. JIT outputs were generated under /tmp/amdpilot-repo-j-bfe220808037/cache/sglang_jit/gfx950; paths and SHA-256 checksums are retained in reports/j-bfe220808037/raw/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Official moonshotai/Kimi-K3 and RadixArk/Kimi-K3-DSpark weights were unavailable, so no full model serving run was performed.",
+    "Only one AMD gfx950 GPU was assigned; the reported TP=8 NVIDIA Blackwell SM10x/CUDA environment and distributed workload were not reproduced.",
+    "Long-context 90k-237k behavior, DSPARK acceptance collapse, SSE [PAD] storms, and the TensorCompare CUDA assertion remain unverified end to end.",
+    "The test validates the KV-cache write-side mechanism only; it does not qualify Kimi-K3 tokenizer semantics, model accuracy, or unrelated proposed mitigations such as pad stopping or allowed_special handling."
+  ]
+}
