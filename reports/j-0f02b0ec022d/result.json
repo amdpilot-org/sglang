@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33292",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported construction-time AttributeError in multimodal_gen CustomOp XPU dispatch and added the missing base forward_xpu fallback to forward_native. Added regression coverage for a native-only subclass plus independent boundaries for an explicit XPU override and a subclass with no implementation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0f02b0ec022d/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_custom_op.py (with production fix temporarily removed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: native-only and no-implementation subclasses both raised AttributeError for missing forward_xpu during construction; 2 failed, 1 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f02b0ec022d/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_custom_op.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary cases: native fallback executes, an explicit XPU override remains selected, and missing native logic raises NotImplementedError on execution rather than AttributeError on construction; 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f02b0ec022d/venv/bin/python < issue-specific standalone reproduction",
+      "exit_code": 0,
+      "what_was_measured": "After the fix, forced XPU platform dispatch selected forward_xpu and a native-only op returned the expected scalar result 42. The same reproduction before the fix exited 1 with the reported construction-time AttributeError."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0f02b0ec022d/venv/bin/python -m ruff check python/sglang/multimodal_gen/runtime/layers/custom_op.py python/sglang/multimodal_gen/test/unit/test_custom_op.py",
+      "exit_code": 1,
+      "what_was_measured": "Formatting/lint tool availability; the prepared interpreter reported that the ruff module is not installed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned device was inventoried as one AMD Instinct MI350X (gfx950), but the defect is Intel XPU platform dispatch at object construction and invokes no GPU computation. Running on AMD would not qualify Intel XPU behavior.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Intel XPU hardware or torch XPU build was available, so actual Intel device execution and full multimodal model loading remain unverified.",
+    "The deterministic tiny Llama serving fixture is not relevant to the multimodal_gen model-construction path and cannot qualify Intel XPU behavior, so it was not used.",
+    "The prepared Python environment does not include ruff.",
+    "No full model weights or model-architecture semantic validation were used; the regression directly exercises the reported CustomOp construction and dispatch contract."
+  ]
+}
