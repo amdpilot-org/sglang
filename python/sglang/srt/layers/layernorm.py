@@ -1307,15 +1307,37 @@ class Gemma3RMSNorm(BaseFusedOp):
         return self.forward_native(x)
 
     def forward_cuda(self, x, residual: Optional[torch.Tensor] = None):
+        # The fused kernels interpret the weight using the activation dtype and
+        # do not validate it first. A Gemma3RMSNorm constructed outside the
+        # model loader can therefore retain its default fp32 weight while its
+        # activations are fp16/bf16. Preserve native mixed-dtype semantics
+        # instead of passing that mismatch to the kernel.
+        if (
+            x.dtype not in (torch.float16, torch.bfloat16)
+            or self.weight.dtype != x.dtype
+            or self.weight.device != x.device
+        ):
+            return self.forward_native(x, residual)
+
         if residual is not None:
             # The decoder residual is token-major and contiguous. The fused
             # kernel updates both tensors in place: x becomes the normalized
             # output and residual becomes x + residual for the next layer.
             gemma_fused_add_rmsnorm(x, residual, self.weight.data, self.eps)
             return x, residual
+
+        if x.shape[-1] != self.weight.numel():
+            return self.forward_native(x)
+
         if x.dim() == 2:
             return gemma_rmsnorm(x, self.weight.data, self.eps)
-        return self.forward_native(x)
+
+        # q_norm and k_norm use [tokens, heads, head_dim]. RMSNorm reduces only
+        # over head_dim, so leading dimensions can share the existing 2D
+        # kernel. Materialize unusual strided views before dispatch because the
+        # kernel interface only guarantees contiguous rows.
+        flat = x.reshape(-1, x.shape[-1]).contiguous()
+        return gemma_rmsnorm(flat, self.weight.data, self.eps).view_as(x)
 
     def forward_xpu(self, x, residual: Optional[torch.Tensor] = None):
         if residual is not None and x.dim() == 2:

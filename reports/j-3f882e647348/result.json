@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32807",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "The recorded base still skipped Gemma3RMSNorm's fused CUDA path for rank-3 q_norm/k_norm inputs and passed mixed-dtype weights to both fused calls unchecked. The patch flattens higher-rank inputs for the existing 2-D kernel, restores their shape, and falls back to native RMSNorm for unsupported activation dtypes or weight dtype/device mismatches. Dispatch regressions fail on the base and pass after the patch. The assigned gfx950 GPU validated native/fallback numerics and the reshape contract, but cannot execute the CUDA-only Gemma kernel, so CUDA kernel execution and the reported NVIDIA NaN behavior remain unverified here.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-3f882e647348/venv/bin/python -m pytest -q test/registered/layers/test_gemma3_rmsnorm_dispatch.py (recorded base, patch reversed)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 4 failures showed rank-3 bypassed the fused call, mixed-dtype normal and residual paths reached fused calls, and invalid hidden width reached the kernel. Raw output: reports/j-3f882e647348/raw/pytest_dispatch_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3f882e647348/venv/bin/python -m pytest -q test/registered/layers/test_gemma3_rmsnorm_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after dispatch regression: 5 tests covering high-rank flatten/restore, non-contiguous materialization, mixed-dtype fallback with and without residual, and invalid hidden width. Raw output: reports/j-3f882e647348/raw/pytest_dispatch_final.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-3f882e647348/venv/bin/python -m pytest -q test/manual/layers/test_layernorm.py::TestGemma3RMSNorm",
+      "exit_code": 0,
+      "what_was_measured": "Existing Gemma3RMSNorm GPU coverage on AMD MI355X/gfx950: 5 tests and 70 subtests passed through the ROCm/native implementation. Raw output: reports/j-3f882e647348/raw/pytest_gemma3_gfx950.txt"
+    },
+    {
+      "command": "GPU numerical script using explicit fp32 RMSNorm reference",
+      "exit_code": 0,
+      "what_was_measured": "On gfx950, patched high-rank dispatch presented contiguous shape (148, 128), restored (37, 4, 128), and matched the explicit reference with max absolute error 0.0. Mixed-dtype normal and residual fallbacks also matched with max absolute error 0.0 and finite outputs. Raw output: reports/j-3f882e647348/raw/gpu_numerics_after.txt"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-3f882e647348/pre-commit /opt/venv/bin/pre-commit run --files python/sglang/srt/layers/layernorm.py test/registered/layers/test_gemma3_rmsnorm_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, and registered-test checks passed. Raw output: reports/j-3f882e647348/raw/precommit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "AMD Instinct MI355X gfx950 executed explicit numerical reference checks and the existing ROCm/native Gemma3RMSNorm suite. reports/j-3f882e647348/raw/environment.txt and gpu_numerics_after.txt identify the device and results."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The assigned GPU is AMD gfx950, while the affected forward_cuda kernel is CUDA-only and is not imported by this checkout on ROCm.",
+    "The installed ROCm sgl_kernel has no executable torch.ops.sgl_kernel.gemma_rmsnorm operator; direct probes are retained in reports/j-3f882e647348/raw/direct_rocm_kernel_probe.txt.",
+    "Therefore the reported NVIDIA mixed-dtype NaN and real CUDA fused-kernel numerics/performance were not reproduced. Dispatch behavior was reproduced against the actual checked-out forward_cuda method using controlled kernel spies.",
+    "No Gemma-3 weights were available or needed; no full-model or serving-path claim is made."
+  ]
+}
