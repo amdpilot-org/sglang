@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "Candidate e32bd205e2a9ec107903f9b03da56802e4868200 is a verified partial observability improvement, not the requested full-lifecycle framework. It exports UnifiedRadixCache L3 query hit/partial-hit/miss and existing prefetch scheduling outcomes, and adds request-correlated L3 query and terminal prefetch logs. The base failure reproduces and the candidate CPU and real-GPU regressions pass, but L1/L2 transfer success/failure metrics, end-to-end request tracing across all tiers, and equivalent coverage for legacy HiRadixCache are not implemented.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-809204b0a14a/venv/bin/python - <<'PY' (construct StorageMetrics(prefetch_stats=...)) on recorded base",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression at the exact recorded base: TypeError because StorageMetrics did not accept prefetch_stats. Raw log: /job/review-evidence-j-809204b0a14a/base/original-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-809204b0a14a/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate's focused observability suite: 16 passed, covering collector deltas, reset epochs, bounded labels, and existing storage failure-token counters. Raw log and JUnit are preserved under /job/review-evidence-j-809204b0a14a/candidate/."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-809204b0a14a/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'buffer_only_read_path_roundtrip' -x",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI350X, 13 passed and 6 repository-gated cases skipped. This exercised actual file-backed L3 query, host staging, GPU load-back, K/V equality checks, and delivery of the new L3 hit snapshot. It does not exercise other backends, legacy HiRadixCache, or complete cross-tier failure tracing."
+    },
+    {
+      "command": "independent source-path and contract inspection at candidate e32bd205e2a9ec107903f9b03da56802e4868200",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports resolve to /job/repo/python/sglang, no native files changed, new lifecycle snapshots originate only in UnifiedRadixCache, and structured rid logs cover storage_query and terminal storage_prefetch rather than the full L1/L2/L3 lifecycle. Evidence: /job/review-evidence-j-809204b0a14a/candidate/import-paths.log and full.diff."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Torch 2.11.0+rocm7.2, HIP 7.2.26015, one AMD Instinct MI350X; candidate GPU round-trip completed 13 passed, 6 skipped.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "An L1-to-L2 transfer failure has no new candidate metric or unified rid event; the patch's new request/token result metrics describe L3 queries only.",
+    "A request cannot be followed through a unified sequence of L1, L2, and L3 lifecycle events: only UnifiedRadixCache storage_query and terminal storage_prefetch receive the proposed [HICACHE] rid format.",
+    "Legacy HiRadixCache does not produce the new prefetch_stats snapshot, so deployments using that implementation do not receive the new L3 request classification.",
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed, and model-specific storage paths remain unverified on this node."
+  ],
+  "remaining_limitations": [
+    "No C++/FlyDSL/native source changed, so a native rebuild was not applicable; Python imports were confirmed from the candidate checkout rather than an installed stale copy.",
+    "The available architecture was one AMD Instinct MI350X. No NVIDIA/CUDA or multi-GPU architecture was available.",
+    "The direct GPU cache round-trip qualifies the modified file-storage path, not semantic model accuracy, HTTP serving, distributed execution, or unavailable storage backends.",
+    "Existing storage_prefetch_unfulfilled_tokens_total offers token-level failure reasons, but the candidate does not implement the original proposal's complete cross-layer transfer success/failure and request-trace contract."
+  ]
+}
