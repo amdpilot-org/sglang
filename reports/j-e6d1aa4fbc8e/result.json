@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37128",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1112",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1075",
+  "candidate_commit": "bd95273ff6988e1191c9d387783fd8ac15f8bcdb",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review found that the exact candidate restores the defined per-request spec_draft and spec_verify tracing contract on EAGLE V2, multi-layer EAGLE V2, and NGRAM. It records drafts-only num_correct_drafts and the accepted_tokens compatibility alias through the existing setter, while guarding the device-to-host acceptance-count read when global tracing is disabled. The intentionally removed spec_draft_extend stage remains absent.",
+  "tests": [
+    {
+      "command": "git grep -n -F set_spec_verify_start_time -- python; git grep -n -F set_spec_verify_end_time -- python; git grep -n -F set_spec_draft_start_time -- python/sglang/srt/speculative/eagle_worker_v2.py; git grep -n -F SPEC_DRAFT_EXTEND -- python",
+      "exit_code": 0,
+      "what_was_measured": "On the recorded base, the first two searches returned only setter definitions and the EAGLE/draft-extend searches returned no matches, reproducing the original missing-call-site failure. The aggregate shell block completed successfully while preserving individual empty search results in raw/base-source-reproduction.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6d1aa4fbc8e/venv/bin/python -m pytest -q test/registered/unit/observability/test_spec_decode_tracing.py test/registered/unit/observability/test_req_time_stats.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit bd95273ff6988e1191c9d387783fd8ac15f8bcdb, 11 tests passed. They cover restored worker call sites, drafts-only count conversion, a shared timestamp, empty batches, and no device read/request mutation with tracing disabled."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-e6d1aa4fbc8e/venv/bin/python /job/review-evidence-j-e6d1aa4fbc8e/adversarial_checks.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial checks on the assigned gfx950 GPU verified accept_lens [1, 2, 5] maps to drafts-only counts [0, 1, 4], including the zero-draft boundary; disabled tracing did not call request setters; None/empty batches avoided tensor operations; and both EAGLE implementations use the shared verify closure."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-e6d1aa4fbc8e/venv/bin/python -m compileall -q <changed Python files>; git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 bd95273ff6988e1191c9d387783fd8ac15f8bcdb",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python source and test files compiled, and the exact candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "PyTorch 2.11.0+rocm7.2 executed the independent acceptance-count check on one AMD Instinct MI350X, reported capability (9, 5), i.e. gfx950. This was a focused tensor-path check, not model serving."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No EAGLE or NGRAM model weights were provided, so no live server or OpenTelemetry exporter trace was produced.",
+    "The GPU check validates the candidate's exact device-tensor conversion, not model semantic accuracy, a distinct model architecture, multi-GPU behavior, or multi-node behavior.",
+    "No native source changed and repository-environment.json declares no prepared native component, so no native rebuild was applicable.",
+    "The original issue asks maintainers to define the contract; the sole issue comment narrows it to spec_draft and spec_verify and explicitly treats spec_draft_extend as deliberately removed. The review follows that documented boundary."
+  ]
+}
