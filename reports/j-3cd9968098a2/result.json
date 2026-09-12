@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33035",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2817",
+  "candidate_issue_url": "https://github.com/amdpilot-org/sglang/issues/2731",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2784",
+  "candidate_commit": "e3da2b295dcd70b2c65158c3458006ea03f2b9b4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; the prepared amdpilot/j-3cd9968098a2 branch was exactly at the recorded base",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly adds weighted non-blocking admission for tokenizer-owned multimodal preprocessing and passes its regression suite, but it acquires only after FastAPI/ASGI body buffering, request-model parsing, and base64 retention. Those explicitly reported pre-scheduler memory stages remain unbounded, so this is a partial fix rather than a complete resolution of the original CPU-OOM feature request.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python <prepared-python> -c 'from sglang.srt.managers.multimodal_preprocessing_admission import MultimodalPreprocessingAdmission' (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base contains no multimodal preprocessing admission controller."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai <prepared-python> -m pytest -q <four core candidate test files>",
+      "exit_code": 1,
+      "what_was_measured": "Unrestricted core run: 318 passed; only two unrelated context-parallel tests failed because prefill CP is explicitly deprecated on HIP."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai <prepared-python> -m pytest -q <four core candidate test files> -k 'not test_canonical_prefill_cp_requires_strategy and not test_context_parallel_handler_initializes_cp_strategy'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate core admission, request-state cleanup, MM configuration, and server-argument behavior: 318 passed, 2 deselected, 47 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python:test/registered/unit/entrypoints/openai <prepared-python> -m pytest -q <candidate-declared 13-file regression set> -k 'not test_canonical_prefill_cp_requires_strategy and not test_context_parallel_handler_initializes_cp_strategy'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-declared accounting, cancellation, processor, protocol mapping, and compatibility regression: 454 passed, 2 deselected, 58 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python <prepared-python> <inline adversarial pre-acquisition payload retention test>",
+      "exit_code": 0,
+      "what_was_measured": "With controller capacity 1 already occupied, 32 distinct parsed 4 MiB base64-like payloads remained allocated before 32/32 admission rejections; payload total 134217782 bytes and measured maximum-RSS growth 135076 KiB."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 e3da2b295dcd70b2c65158c3458006ea03f2b9b4",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI350X gfx950 was visible, but the changed code is CPU-side Python admission/accounting. No independent GPU numerical claim applies; Kimi-K2.6 weights and the reported 200-request/5600-image workload were unavailable."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate changes no C/C++/CUDA/HIP/FlyDSL/native or build-definition files. Source imports were verified from /job/repo/python. Existing cached AITER shared objects were observed but are not changed by this candidate.",
+  "remaining_counterexamples": [
+    "Concurrent clients can each have their complete HTTP body buffered and parsed into request/base64 objects before TokenizerManager.generate_request attempts admission; memory in this stage is not bounded by --max-mm-preprocessing-inflight-items-per-worker.",
+    "The independent 32-request adversarial case retained approximately 128 MiB of payload data with a configured admission budget of one item, then rejected every request only after allocation.",
+    "The exact Kimi-K2.6, 200-concurrent-request, 28-images-per-request, 1.5 TiB host-memory failure was not reproducible because model weights and an equivalent host were unavailable, so end-to-end prevention of that OOM remains unverified.",
+    "The option is rejected for the Rust frontend and EPD language-only mode, leaving those architectures unsupported by this feature."
+  ],
+  "remaining_limitations": [
+    "This review verifies tokenizer-side accounting and error propagation with unit tests, not semantic multimodal model accuracy.",
+    "No qualified multimodal model fixture or Kimi-K2.6 weights were available; the provided tiny Llama fixture is text-only and was intentionally not used as unrelated proof.",
+    "Two context-parallel server-argument tests are platform-inapplicable on HIP and fail independently of the candidate; both are retained in raw evidence and narrowly deselected in the applicable run.",
+    "No native rebuild was performed because no native source or build input changed."
+  ],
+  "evidence_directory": "reports/j-3cd9968098a2/evidence"
+}
