@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33867",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2007",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1968",
+  "candidate_commit": "985180a62f3e589816fd64eb182c3aa62b898805",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base already accepts the original two-text function_call_output array, so the historical 400 was not reproducible at that revision; it does concatenate the parts without a boundary. The base independently reproduced all three review counterexamples by dropping image/file-only outputs and conflating mixed parts. Exact candidate 985180a preserves those schema-valid parts as newline-delimited text/compact JSON, passes its regression suite, and passes independent request-schema plus real input-construction probes. This is a production correction with regression coverage, not test-only hardening.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-2e2441e6ba21/venv/bin/python /job/review-evidence-j-2e2441e6ba21/probe.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "ResponsesRequest schema validation and OpenAIServingResponses._construct_input_messages on the original payload plus independent image-only, file-id, file-data, mixed, embedded-newline, and empty-array cases. The original payload was accepted rather than producing the historical 400, while all three specified lossy-normalization counterexamples reproduced. Raw output: evidence/base_probe.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2e2441e6ba21/venv/bin/python /job/review-evidence-j-2e2441e6ba21/probe.py (candidate 985180a62f3e589816fd64eb182c3aa62b898805)",
+      "exit_code": 0,
+      "what_was_measured": "The same schema-valid cases through direct normalization and actual request-message construction. Candidate output retained text boundaries and serialized every image/file part without loss. Raw output: evidence/candidate_probe.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2e2441e6ba21/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py::InputItemNormalizationTestCase",
+      "exit_code": 0,
+      "what_was_measured": "Candidate-focused normalization regression: 8 passed. Raw output: evidence/candidate_focused_tests.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-2e2441e6ba21/venv/bin/python -m pytest -q test/registered/unit/entrypoints/openai/test_serving_responses.py",
+      "exit_code": 0,
+      "what_was_measured": "Complete Responses serving unit file: 39 passed and 2 subtests passed. Raw output: evidence/candidate_full_tests.txt."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The host exposes one AMD Instinct MI350X/gfx950, but this deterministic Python request-normalization review did not execute GPU kernels."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The base-to-candidate production diff changes only python/sglang/srt/entrypoints/openai/serving_responses.py; no native source or extension changed, so a native rebuild was not applicable.",
+  "source_import_paths": {
+    "python": "/tmp/amdpilot-repo-j-2e2441e6ba21/venv/bin/python",
+    "sglang": "/job/repo/python/sglang/__init__.py",
+    "serving_responses": "/job/repo/python/sglang/srt/entrypoints/openai/serving_responses.py"
+  },
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights and the reported deepseekv4/DSPARK serving configuration were unavailable, so architecture-specific generation was not run.",
+    "No model-backed HTTP server was started; validation covered request schema parsing and the real internal construction path before tokenization/generation.",
+    "The exact historical 400 cannot be demonstrated on the recorded base because that base already includes array acceptance; the observed remaining base defects are lossy content conversion and missing part boundaries."
+  ]
+}
