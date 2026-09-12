@@ -177,6 +177,10 @@ class Observability(msgspec.Struct):
         str,
         "Config opentelemetry collector endpoint if --enable-trace is set. format: <ip>:<port>",
     ] = "localhost:4317"
+    otlp_service_name: A[
+        Optional[str],
+        "Service name for OTLP traces (displayed as 'service.name' in trace backends). Defaults to OTEL_SERVICE_NAME when set, otherwise 'sglang'.",
+    ] = None
     # RequestMetricsExporter configuration
     export_metrics_to_file: A[
         bool,

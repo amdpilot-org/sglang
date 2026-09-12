@@ -175,6 +175,58 @@ class TestProcessTracingInit(unittest.TestCase):
         finally:
             mod.opentelemetry_imported = orig
 
+    @unittest.skipUnless(_has_otel, "opentelemetry not installed")
+    def test_service_name_precedence(self):
+        cases = [
+            ("cli-name", "env-name", "unused-default", "cli-name"),
+            (None, "env-name", "unused-default", "env-name"),
+            ("", "env-name", "unused-default", "env-name"),
+            (None, None, "sglang", "sglang"),
+            ("", "", "sglang-diffusion", "sglang-diffusion"),
+        ]
+        for server_name, env_name, default_name, expected in cases:
+            with self.subTest(server_name=server_name, env_name=env_name):
+                environment = (
+                    {} if env_name is None else {"OTEL_SERVICE_NAME": env_name}
+                )
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(mod.Resource, "create") as create_resource,
+                    patch.object(mod, "TracerProvider"),
+                    patch.object(mod, "BatchSpanProcessor"),
+                    patch.object(mod, "get_otlp_span_exporter"),
+                    patch.object(mod.trace, "set_tracer_provider"),
+                    patch.object(mod.trace, "get_tracer"),
+                ):
+                    process_tracing_init(
+                        "localhost:4317",
+                        server_name,
+                        default_server_name=default_name,
+                    )
+                create_resource.assert_called_once_with(
+                    attributes={mod.SERVICE_NAME: expected}
+                )
+
+    @unittest.skipUnless(_has_otel, "opentelemetry not installed")
+    def test_async_exporter_receives_resolved_service_name(self):
+        with (
+            patch.dict(os.environ, {"OTEL_SERVICE_NAME": "env-name"}, clear=True),
+            patch.object(mod.Resource, "create"),
+            patch.object(mod, "TracerProvider"),
+            patch.object(mod, "BatchSpanProcessor"),
+            patch.object(mod, "get_otlp_span_exporter"),
+            patch.object(mod.trace, "set_tracer_provider"),
+            patch.object(mod.trace, "get_tracer"),
+            patch.object(mod.envs.SGLANG_TRACE_ASYNC, "get", return_value=True),
+            patch(
+                "sglang.srt.observability.trace_async.start_trace_exporter"
+            ) as start_exporter,
+        ):
+            process_tracing_init("localhost:4317", None)
+        start_exporter.assert_called_once_with(
+            "localhost:4317", "env-name", trace_modules=None
+        )
+
 
 class TestTraceReqContextDisabled(unittest.TestCase):
     def setUp(self):

@@ -76,6 +76,14 @@ class TestServerArgsMigratedCliMetadata(CustomTestCase):
                 self.assertEqual(args.dp_size, 3)
                 self.assertEqual(ServerArgs.from_cli_args(args).dp_size, 3)
 
+    def test_otlp_service_name_cli(self):
+        args = self.parser.parse_args(
+            ["--model", "dummy", "--otlp-service-name", "staging-inference"]
+        )
+        self.assertEqual(
+            ServerArgs.from_cli_args(args).otlp_service_name, "staging-inference"
+        )
+
     def test_migrated_and_manual_options_parse_together(self):
         args = self.parser.parse_args(
             [

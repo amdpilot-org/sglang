@@ -40,8 +40,9 @@ def init_diffusion_tracing(server_args, thread_label: str):
     # srt owns TraceReqContext and filters spans through its trace_modules list
     process_tracing_init(
         server_args.otlp_traces_endpoint,
-        "sglang-diffusion",
+        server_args.otlp_service_name,
         trace_modules=DIFFUSION_TRACE_MODULE,
+        default_server_name="sglang-diffusion",
     )
     trace_set_thread_info(thread_label)
 
