@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34676",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1764",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1728",
+  "candidate_commit": "9ee7239c734292e901b5dbd9792ce261c6ae27b9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the reviewed duplicate ownership of an active chunked request and prevents the original typed late allocation miss from escaping. It remains incomplete because an ordinary request requeued after a miss on an empty running batch is permanently blocked by running_batch.batch_is_full on subsequent scheduling passes.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebc023b03be3/venv/bin/python -m pytest -vv /job/review-evidence/j-ebc023b03be3/review_scheduler_oom.py::test_base_runtime_error_escapes_after_admission",
+      "exit_code": 0,
+      "what_was_measured": "At recorded base 358c163, the test positively confirmed that a late RuntimeError escaped _get_new_batch_prefill_raw after the admitted request had been removed from waiting_queue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebc023b03be3/venv/bin/python -m pytest -vv /tmp/amdpilot-repo-j-ebc023b03be3/review_test_prefill_alloc_oom_requeue.py::TestSchedulerPrefillOOM::test_existing_chunked_req_is_not_duplicated_in_waiting_queue",
+      "exit_code": 1,
+      "what_was_measured": "At parent candidate b6ca9a3, the independently reviewed counterexample reproduced: the active chunked request was also appended to waiting_queue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebc023b03be3/venv/bin/python -m pytest -q test/registered/unit/managers/test_prefill_alloc_oom_requeue.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 9ee7239, all 37 focused tests and 12 subtests passed, including typed allocation failure, request-slot rollback, Mamba admission boundaries, and chunked-request ownership cases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebc023b03be3/venv/bin/python -m pytest -vv /job/review-evidence/j-ebc023b03be3/review_scheduler_oom.py::test_candidate_empty_batch_requeue_is_retryable",
+      "exit_code": 1,
+      "what_was_measured": "At exact candidate 9ee7239, a second scheduler pass did not retry the sole requeued request because the empty running batch retained batch_is_full=true."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Control-flow tests ran on CPU. Inventory showed one AMD Instinct MI355X with Torch 2.11.0+rocm7.2 and HIP 7.2.26015; the NVIDIA B300 TP8/DCP4 Kimi-K3 workload was unavailable."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With no active chunked request and an empty running batch, a late KVCacheOOMError requeues the ordinary request but sets running_batch.batch_is_full=true. Every subsequent _get_new_batch_prefill_raw call returns at the initial guard, so the request is preserved but neither retried nor failed request-locally."
+  ],
+  "remaining_limitations": [
+    "The exact Kimi-K3 TP8/DCP4 sustained hybrid-Mamba workload was not run because only one AMD MI355X was available instead of eight NVIDIA B300 GPUs and the model weights were unavailable.",
+    "The deterministic tiny Llama fixture does not exercise hybrid Mamba allocation and was not used as substitute evidence.",
+    "No GPU numerical, model-semantic, multi-rank, or CUDA-specific behavior was validated.",
+    "No native rebuild was performed because the candidate modifies no native source."
+  ]
+}
