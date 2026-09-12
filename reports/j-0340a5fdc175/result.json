@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37160",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Confirmed that LMCRadixCache dropped cache_salt on both MP lookup and store. The candidate forwards salt when LMCache advertises supports_cache_salt, fails closed for salted requests on older connectors, preserves unsalted compatibility, and makes MP store cleanup exception-safe.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0340a5fdc175/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_lmcache_cache_salt.py (before change)",
+      "exit_code": 1,
+      "what_was_measured": "Regression failed against the prepared base because lookup/store did not propagate cache_salt, legacy salted access was not gated, cleanup was not exception-safe, and the documented contract still excluded external storage."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0340a5fdc175/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_lmcache_cache_salt.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused contract and boundary tests passed: salted lookup forwarding, salted legacy fail-closed behavior, unsalted legacy compatibility, salted store handoff/gating, and exception-safe MP cleanup."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0340a5fdc175/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_radix_cache_unit.py test/registered/unit/mem_cache/test_lmcache_cache_salt.py",
+      "exit_code": 0,
+      "what_was_measured": "44 tests and 61 subtests passed, covering the focused LMCache boundary plus existing RadixKey/RadixCache behavior."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0340a5fdc175/venv/bin/python -m compileall -q python/sglang/srt/mem_cache/storage/lmcache/lmc_radix_cache.py test/registered/unit/mem_cache/test_lmcache_cache_salt.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python files compiled and the patch had no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No live MP daemon end-to-end reproduction was possible because LMCache is absent from the prepared environment and its companion salt-aware connector API is not yet released or merged.",
+    "No GPU execution was performed: this is cache-key metadata routing, and without the LMCache package/daemon a GPU run would not independently validate wire-key isolation.",
+    "The candidate is limited to LMCache MP mode. IP/XPU mode and extra_key/LoRA external namespacing remain outside this issue's coordinated fix.",
+    "Deployment must use an LMCache connector that advertises supports_cache_salt=True for salted external reuse; older connectors intentionally keep salted requests local."
+  ]
+}
