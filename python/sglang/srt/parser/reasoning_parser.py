@@ -78,6 +78,10 @@ class BaseReasoningFormatDetector:
     ):
         self.think_start_token = think_start_token
         self.think_end_token = think_end_token
+        # Channel-framed formats may need to emit an answer header after the
+        # reasoning terminator before guided decoding can safely resume.
+        self.grammar_channel_header_end: Optional[str] = None
+        self.grammar_channel_reasoning_header: Optional[str] = None
         self.think_excluded_tokens = think_excluded_tokens
         self.tool_start_token = tool_start_token
         self.force_reasoning = force_reasoning
@@ -1995,6 +1999,8 @@ class MuseGlimmerDetector(BaseReasoningFormatDetector):
             previous_content=previous_content,
             force_nonempty_content=force_nonempty_content,
         )
+        self.grammar_channel_header_end = MESSAGE
+        self.grammar_channel_reasoning_header = " to=self"
         self._recipient: Optional[str] = None
         self._in_body = False
         self._at_stream_start = True

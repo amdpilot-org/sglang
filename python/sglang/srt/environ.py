@@ -1378,6 +1378,8 @@ class Envs:
     SGLANG_EMBEDDINGS_SPARSE_HEAD = EnvStr(None)
     # Think tokens budget: negative means unlimited, >= 0 caps thinking tokens
     SGLANG_MAX_THINK_TOKENS = EnvInt(-1)
+    # Channel header budget after reasoning: negative means unlimited
+    SGLANG_MAX_CHANNEL_HEADER_TOKENS = EnvInt(16)
     SGLANG_PATCH_TOKENIZER = EnvBool(True)
     SGLANG_REQUEST_STATE_WAIT_TIMEOUT = EnvInt(4)
     SGLANG_DEFAULT_THINKING = EnvBool(False)
