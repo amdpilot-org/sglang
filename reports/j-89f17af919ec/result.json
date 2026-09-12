@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38815",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/563",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/560",
+  "candidate_commit": "4920768354a34e14f43fb6d0c56ab491d608fa96",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The prepared base reproduced the reported contract violation: an SWA branch at depth 96 reduced the insertion key paired with a Mamba checkpoint from depth 192 to 96. At the exact candidate commit, the same real unified-cache regression passed and verified that depth 96 has no Mamba checkpoint, depth 192 owns the new checkpoint, the existing depth-64 and depth-128 checkpoints remain intact, and eviction of depth 192 falls back to depth 64. The candidate changes shared Python insertion preparation only and correctly prevents SWA from independently truncating a Full/SWA/Mamba insertion. This is a verified shared-logic fix, but full original-deployment resolution remains unverified because Rust TreeCore could not load without a runnable cargo and the H200 Inkling end-to-end workload was unavailable.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32.test_swa_branch_does_not_rekey_later_mamba_checkpoint (candidate test with base SWA implementation restored)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction on the actual prepared base implementation: effective insertion length was 96 instead of the unsliceable Mamba checkpoint depth 192. Raw output: /job/review-evidence/base/regression.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32.test_swa_branch_does_not_rekey_later_mamba_checkpoint test_unified_radix_cache_unittest.Test_FULL_SWA_ps1_sw4.test_swa_branching_seqlen_caps_insert_after_forward",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after candidate behavior and an independent neighboring non-Mamba contract: hybrid checkpoint ownership remained correct while ordinary Full+SWA still capped insertion at its branch. Raw output: /job/review-evidence/candidate/focused-python.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32",
+      "exit_code": 0,
+      "what_was_measured": "Broader adversarial hybrid-cache class: 131 tests ran, 39 passed and 92 configuration-gated tests skipped; no executable Python TreeCore counterexample was found. Raw output: /job/review-evidence/candidate/full-hybrid-class.log"
+    },
+    {
+      "command": "SGLANG_UNIFIED_RADIX_TREE_CORE_BACKEND=rust HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python:/job/repo/test/registered/unit/mem_cache /tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python -m unittest test_unified_radix_cache_unittest.Test_FULL_SWA_MAMBA_ps1_sw128_h8l32.test_swa_branch_does_not_rekey_later_mamba_checkpoint",
+      "exit_code": 1,
+      "what_was_measured": "Environment blocker, not a candidate failure: Rust TreeCore did not load because the extension loader could not execute cargo and raised PermissionError before the test body. Raw output: /job/review-evidence/candidate/rust-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python (inspect imported sglang and SWAComponent source paths)",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed imports came from /job/repo/python/sglang and the exact checked-out candidate source, not an installed sglang wheel. Raw output: /job/review-evidence/candidate/import-paths.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-89f17af919ec/venv/bin/python -m py_compile python/sglang/srt/mem_cache/unified_cache/components/swa_component.py test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate source and regression test compile successfully. Raw output: /job/review-evidence/candidate/pycompile.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X was visible through HIP_VISIBLE_DEVICES=0; torch 2.11.0+rocm7.2, HIP 7.2.26015, gfx capability (9, 5), and a device tensor sum of 28.0 were recorded in /job/review-evidence/base/gpu-probe.log. The cache regression itself executed with that same GPU assignment.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original observed configuration used H200, Rust TreeCore, Triton, and the real thinkingmachines/Inkling checkpoint. This prepared host provides one AMD Instinct MI350X with ROCm 7.2 instead.",
+    "Rust TreeCore validation is environment-blocked: cargo is not runnable/available from the prepared PATH, so the loader raises PermissionError while querying cargo before executing the regression.",
+    "The real Inkling checkpoint and original prompts were not present, so cold/warm logprob and greedy-token parity were not rerun. The review instead validated actual unified-cache node depths and Mamba slot ownership on GPU.",
+    "No native or FlyDSL C++ source changed in candidate commit 4920768354a34e14f43fb6d0c56ab491d608fa96, repository-environment.json declares no native artifact, and therefore no native rebuild was applicable.",
+    "HiCache-specific methods in the broad class were configuration-gated and skipped; the source issue explicitly does not require HiCache, so they were not treated as proof or as a counterexample."
+  ]
+}
