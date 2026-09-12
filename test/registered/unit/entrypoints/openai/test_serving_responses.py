@@ -477,6 +477,77 @@ class InputItemNormalizationTestCase(CustomTestCase):
             {"role": "tool", "tool_call_id": "call_abc", "content": "42"},
         )
 
+    def test_function_call_output_content_parts_preserve_boundaries(self):
+        normalized = OpenAIServingResponses._normalize_response_message_for_chat(
+            {
+                "type": "function_call_output",
+                "call_id": "call_text",
+                "output": [
+                    {"type": "input_text", "text": "First result"},
+                    {"type": "input_text", "text": "Second result"},
+                ],
+            }
+        )
+        self.assertEqual(
+            normalized,
+            {
+                "role": "tool",
+                "tool_call_id": "call_text",
+                "content": "First result\nSecond result",
+            },
+        )
+
+    def test_function_call_output_image_part_is_not_dropped(self):
+        normalized = OpenAIServingResponses._normalize_response_message_for_chat(
+            {
+                "type": "function_call_output",
+                "call_id": "call_image",
+                "output": [
+                    {
+                        "type": "input_image",
+                        "image_url": "https://example.com/result.png",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            normalized["content"],
+            '{"type":"input_image","image_url":"https://example.com/result.png"}',
+        )
+
+    def test_function_call_output_file_part_is_not_dropped(self):
+        normalized = OpenAIServingResponses._normalize_response_message_for_chat(
+            {
+                "type": "function_call_output",
+                "call_id": "call_file",
+                "output": [{"type": "input_file", "file_id": "file-123"}],
+            }
+        )
+        self.assertEqual(
+            normalized["content"],
+            '{"type":"input_file","file_id":"file-123"}',
+        )
+
+    def test_function_call_output_mixed_parts_are_delimited_and_preserved(self):
+        normalized = OpenAIServingResponses._normalize_response_message_for_chat(
+            {
+                "type": "function_call_output",
+                "call_id": "call_mixed",
+                "output": [
+                    {"type": "input_text", "text": "before"},
+                    {
+                        "type": "input_image",
+                        "image_url": "https://example.com/result.png",
+                    },
+                    {"type": "input_text", "text": "after"},
+                ],
+            }
+        )
+        self.assertEqual(
+            normalized["content"],
+            'before\n{"type":"input_image","image_url":"https://example.com/result.png"}\nafter',
+        )
+
     def test_unknown_input_item_type_raises(self):
         with self.assertRaises(ValueError):
             OpenAIServingResponses._normalize_response_message_for_chat(
