@@ -51,11 +51,9 @@ def handle_attention_backend_compatibility(server_args: Any):
     run_post_process_pass(server_args, _attention_backend_default)
 
     # Torch native and flex attention backends
-    attention_backend = resolved_view(server_args).attention_backend
-    if attention_backend == "torch_native":
-        logger.warning(
-            "Cuda graph is disabled because of using torch native attention backend"
-        )
+    prefill_backend, decode_backend = attention_backends_of(resolved_view(server_args))
+    if decode_backend in ("torch_native", "sage"):
+        logger.warning("Decode cuda graph is disabled for %s", decode_backend)
         declare_resolution(
             server_args,
             "_handle_attention_backend_compatibility",
@@ -63,6 +61,8 @@ def handle_attention_backend_compatibility(server_args: Any):
                 cfg.cuda_graph_config, Phase.DECODE, backend=Backend.DISABLED
             ),
         )
+    if prefill_backend in ("torch_native", "sage"):
+        logger.warning("Prefill cuda graph is disabled for %s", prefill_backend)
         declare_resolution(
             server_args,
             "_handle_attention_backend_compatibility",
@@ -71,6 +71,7 @@ def handle_attention_backend_compatibility(server_args: Any):
             ),
         )
 
+    attention_backend = resolved_view(server_args).attention_backend
     if attention_backend == "flex_attention":
         logger.warning(
             "Cuda graph is disabled because of using torch Flex Attention backend"

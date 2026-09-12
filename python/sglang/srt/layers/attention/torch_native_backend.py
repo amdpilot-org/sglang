@@ -58,6 +58,28 @@ class TorchNativeAttnBackend(AttentionBackend):
         else:
             self.swa_out_cache_loc = None
 
+    def _attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        *,
+        attn_mask: Optional[torch.Tensor],
+        enable_gqa: bool,
+        scale: Optional[float],
+        is_causal: bool,
+    ) -> torch.Tensor:
+        """Execute dense attention after the paged KV cache has been gathered."""
+        return scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            enable_gqa=enable_gqa,
+            scale=scale,
+            is_causal=is_causal,
+        )
+
     def _run_sdpa_forward_extend(
         self,
         query: torch.Tensor,
@@ -157,7 +179,7 @@ class TorchNativeAttnBackend(AttentionBackend):
                 is_causal = False
 
             per_req_out_redudant = (
-                scaled_dot_product_attention(
+                self._attention(
                     per_req_query_redudant.unsqueeze(0),
                     per_req_key.unsqueeze(0),
                     per_req_value.unsqueeze(0),
@@ -259,7 +281,7 @@ class TorchNativeAttnBackend(AttentionBackend):
                 is_causal = False
 
             per_req_out = (
-                scaled_dot_product_attention(
+                self._attention(
                     per_req_query.unsqueeze(0),
                     per_req_key.unsqueeze(0),
                     per_req_value.unsqueeze(0),
