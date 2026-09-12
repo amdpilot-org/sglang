@@ -12,14 +12,14 @@ metatags:
 
 python3 -m sglang.launch_server \
   --model-path meta-llama/Meta-Llama-3.1-405B-Instruct \
-  --tp 16 \
+  --tp-size 16 \
   --dist-init-addr 172.16.4.52:20000 \
   --nnodes 2 \
   --node-rank 0
 
 python3 -m sglang.launch_server \
   --model-path meta-llama/Meta-Llama-3.1-405B-Instruct \
-  --tp 16 \
+  --tp-size 16 \
   --dist-init-addr 172.16.4.52:20000 \
   --nnodes 2 \
   --node-rank 1
@@ -28,76 +28,214 @@ python3 -m sglang.launch_server \
 Note that LLama 405B (fp8) can also be launched on a single node.
 
 ```bash Command
-python -m sglang.launch_server --model-path meta-llama/Meta-Llama-3.1-405B-Instruct-FP8 --tp 8
+python -m sglang.launch_server --model-path meta-llama/Meta-Llama-3.1-405B-Instruct-FP8 --tp-size 8
 ```
 
 ## DeepSeek V3/R1
 
 Please refer to [DeepSeek documents for reference](/cookbook/autoregressive/DeepSeek/DeepSeek-V3#4-2-5-multi-node-deployment).
 
-## Multi-Node Inference on SLURM
+## Run on Slurm
 
-This example showcases how to serve SGLang server across multiple nodes by SLURM. Submit the following job to the SLURM cluster.
+The examples below cover single-node serving, multi-node serving, offline batch inference, and Apptainer/Singularity. Replace `ENV_FOLDER`, `MODEL_PATH`, and `PARTITION` with values for your cluster. The environment, container, and model path must be visible on every allocated node.
+
+Create the log directory before calling `sbatch`; Slurm opens output files before the script runs.
+
+```bash
+mkdir -p SLURM_Logs
+```
+
+### Multi-node serving
+
+This example requests two NVIDIA GPU nodes and starts one SGLang launcher per node. `--tp-size 16` spans all 16 GPUs. For AMD clusters, request the site-specific GPU resource and use a ROCm SGLang environment or image instead.
 
 ```bash Command
 #!/bin/bash -l
 
 #SBATCH -o SLURM_Logs/%x_%j_master.out
 #SBATCH -e SLURM_Logs/%x_%j_master.err
-#SBATCH -D ./
 #SBATCH -J Llama-405B-Online-Inference-TP16-SGL
 
 #SBATCH --nodes=2
 #SBATCH --ntasks=2
-#SBATCH --ntasks-per-node=1  # Ensure 1 task per node
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=18
-#SBATCH --mem=224GB
-#SBATCH --partition="lmsys.org"
+#SBATCH --mem=224G
+#SBATCH --partition=PARTITION
 #SBATCH --gres=gpu:8
 #SBATCH --time=12:00:00
 
-echo "[INFO] Activating environment on node $SLURM_PROCID"
-if ! source ENV_FOLDER/bin/activate; then
-    echo "[ERROR] Failed to activate environment" >&2
-    exit 1
-fi
+set -euo pipefail
+
+source ENV_FOLDER/bin/activate
 
 # Define parameters
 model=MODEL_PATH
 tp_size=16
+server_port="${SGLANG_PORT:-30000}"
+dist_port="${SGLANG_DIST_PORT:-20000}"
 
 echo "[INFO] Running inference"
 echo "[INFO] Model: $model"
 echo "[INFO] TP Size: $tp_size"
 
-# Set NCCL initialization address using the hostname of the head node
-HEAD_NODE=$(scontrol show hostname "$SLURM_NODELIST" | head -n 1)
-NCCL_INIT_ADDR="${HEAD_NODE}:8000"
-echo "[INFO] NCCL_INIT_ADDR: $NCCL_INIT_ADDR"
+head_node=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | sed -n '1p')
+dist_init_addr="${head_node}:${dist_port}"
 
-# Launch the model server on each node using SLURM
-srun --ntasks=2 --nodes=2 --output="SLURM_Logs/%x_%j_node$SLURM_NODEID.out" \
-    --error="SLURM_Logs/%x_%j_node$SLURM_NODEID.err" \
-    python3 -m sglang.launch_server \
-    --model-path "$model" \
-    --grammar-backend "xgrammar" \
-    --tp "$tp_size" \
-    --dist-init-addr "$NCCL_INIT_ADDR" \
-    --nnodes 2 \
-    --node-rank "$SLURM_NODEID" &
+export SGLANG_MODEL_PATH="$model"
+export SGLANG_TP_SIZE="$tp_size"
+export SGLANG_SERVER_PORT="$server_port"
+export SGLANG_DIST_INIT_ADDR="$dist_init_addr"
 
-# Wait for the NCCL server to be ready on port 30000
-while ! nc -z "$HEAD_NODE" 30000; do
-    sleep 1
-    echo "[INFO] Waiting for $HEAD_NODE:30000 to accept connections"
+# The single-quoted command expands SLURM_PROCID inside each srun task. Using
+# SLURM_NODEID in the outer batch shell can assign the same rank to both tasks.
+srun --ntasks=2 --nodes=2 --ntasks-per-node=1 \
+    --output="SLURM_Logs/%x_%j_node%n.out" \
+    --error="SLURM_Logs/%x_%j_node%n.err" \
+    bash -c '
+        exec python3 -m sglang.launch_server \
+            --model-path "$SGLANG_MODEL_PATH" \
+            --host 0.0.0.0 \
+            --port "$SGLANG_SERVER_PORT" \
+            --tp-size "$SGLANG_TP_SIZE" \
+            --dist-init-addr "$SGLANG_DIST_INIT_ADDR" \
+            --nnodes 2 \
+            --node-rank "$SLURM_PROCID"
+    ' &
+server_step_pid=$!
+
+ready=0
+for ((attempt = 1; attempt <= 120; attempt++)); do
+    if curl -fsS "http://${head_node}:${server_port}/health" >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    if ! kill -0 "$server_step_pid" 2>/dev/null; then
+        echo "[ERROR] The Slurm step exited before the server became healthy" >&2
+        wait "$server_step_pid" || true
+        exit 1
+    fi
+    sleep 5
 done
 
-echo "[INFO] $HEAD_NODE:30000 is ready to accept connections"
+if [ "$ready" -ne 1 ]; then
+    echo "[ERROR] Server did not become healthy within 10 minutes" >&2
+    kill "$server_step_pid" 2>/dev/null || true
+    wait "$server_step_pid" 2>/dev/null || true
+    exit 1
+fi
 
-# Keep the script running until the SLURM job times out
-wait
+echo "[INFO] Server ready at http://${head_node}:${server_port}"
+wait "$server_step_pid"
 ```
 
-Then, you can test the server by sending requests following other [documents](../../basic_usage/openai_api_completions).
+Send requests to the rank-zero server using the [OpenAI-compatible API](/docs/basic_usage/openai_api_completions).
+
+### Single-node serving
+
+Use this smaller job for a model that fits on one node. Set `SGLANG_PORT` when submitting the job to override port 30000.
+
+```bash Command
+#!/bin/bash -l
+
+#SBATCH -o SLURM_Logs/%x_%j.out
+#SBATCH -e SLURM_Logs/%x_%j.err
+#SBATCH -J sglang-single-node
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --partition=PARTITION
+#SBATCH --gres=gpu:1
+#SBATCH --time=12:00:00
+
+set -euo pipefail
+source ENV_FOLDER/bin/activate
+
+port="${SGLANG_PORT:-30000}"
+exec python3 -m sglang.launch_server \
+    --model-path MODEL_PATH \
+    --host 0.0.0.0 \
+    --port "$port"
+```
+
+The server is reachable only while the allocation is active. Follow your site's policy for access; for example, some clusters permit an SSH tunnel through a login node.
+
+### Offline batch inference
+
+Jobs that process fixed prompts do not need an HTTP server. SGLang uses Python's `spawn` multiprocessing method, so write the program to a real file and protect its entry point.
+
+```bash Command
+#!/bin/bash -l
+
+#SBATCH -o SLURM_Logs/%x_%j.out
+#SBATCH -e SLURM_Logs/%x_%j.err
+#SBATCH -J sglang-offline
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --partition=PARTITION
+#SBATCH --gres=gpu:1
+#SBATCH --time=04:00:00
+
+set -euo pipefail
+source ENV_FOLDER/bin/activate
+export SGLANG_MODEL_PATH=MODEL_PATH
+
+script_path=$(mktemp "${SLURM_TMPDIR:-/tmp}/sglang-offline.XXXXXX.py")
+trap 'rm -f "$script_path"' EXIT
+cat >"$script_path" <<'PY'
+import os
+import sglang as sgl
+
+
+def main():
+    prompts = ["Hello, my name is", "The capital of France is"]
+    with sgl.Engine(model_path=os.environ["SGLANG_MODEL_PATH"]) as engine:
+        outputs = engine.generate(prompts, {"max_new_tokens": 64})
+    for output in outputs:
+        print(output["text"])
+
+
+if __name__ == "__main__":
+    main()
+PY
+
+srun --ntasks=1 python3 "$script_path"
+```
+
+See the [Offline Engine API](/docs/basic_usage/offline_engine_api) for other sampling and output options.
+
+### Apptainer or Singularity
+
+Many HPC sites expose containers through Apptainer (formerly Singularity). Build or pull the SIF into shared storage according to site policy, then replace environment activation and the task command in the multi-node example with the following pattern:
+
+```bash Command
+export SGLANG_IMAGE=/shared/images/sglang.sif
+export SGLANG_MODEL_DIR=/shared/models
+
+srun --ntasks=2 --nodes=2 --ntasks-per-node=1 \
+    bash -c '
+        exec apptainer exec --nv \
+            --bind "$SGLANG_MODEL_DIR:/models:ro" \
+            "$SGLANG_IMAGE" \
+            python3 -m sglang.launch_server \
+                --model-path /models/MODEL_NAME \
+                --host 0.0.0.0 \
+                --port "$SGLANG_SERVER_PORT" \
+                --tp-size "$SGLANG_TP_SIZE" \
+                --dist-init-addr "$SGLANG_DIST_INIT_ADDR" \
+                --nnodes 2 \
+                --node-rank "$SLURM_PROCID"
+    '
+```
+
+Use `singularity exec` instead if that is the command installed by your site. `--nv` passes NVIDIA devices and libraries through to the container; use `--rocm` for an AMD ROCm image. Bind the Hugging Face cache or a local checkpoint directory if weights are not already under the mounted model path. Never put access tokens directly in a batch script stored in a shared directory.
+
+### Cluster-specific settings
+
+- Scheduler accounts, partitions, GPU resource names, memory, and time limits differ by site.
+- The HTTP and distributed-init ports must be unused and reachable between the allocated nodes.
+- On hosts with multiple network interfaces, set `NCCL_SOCKET_IFNAME` and `GLOO_SOCKET_IFNAME` to interfaces that are routable between nodes. ROCm deployments may also require site-specific RCCL settings.
+- Tensor parallel size is the total number of GPUs used by the model and must match the allocation. Each node in these examples must expose the same number of GPUs.
+- Very large checkpoints such as DeepSeek V3/R1 require enough aggregate GPU memory and a model cache suitable for concurrent reads. The examples do not make an unsupported GPU architecture compatible.
 
 Thanks for [aflah02](https://github.com/aflah02) for providing the example, based on his [blog post](https://aflah02.substack.com/p/multi-node-llm-inference-with-sglang).
