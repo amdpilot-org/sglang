@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36598",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1227",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1195",
+  "candidate_commit": "76e3c59c26476b8348743389b97bc650984ec87a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The exact candidate adds regression coverage but no production fix; its recorded-base parent already contains the full non-DSA guard and returns zero for the reported promoted GLM override state. Independent adversarial cases found no behavioral counterexample. The candidate's PR prose/report cites the wrong mirror issue number (1140 instead of 1227).",
+  "classification": "test-only hardening for a full original-issue fix already present in the base",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7dc4bb8bf5d8/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_dsa_seed_metadata_dim.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's five focused cases for disabled DSA with sharing false/true, enabled DSA with sharing false, and enabled pooled widths 2048 and 2175. All passed on the exact candidate commit."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7dc4bb8bf5d8/venv/bin/python /job/review-evidence/j-7dc4bb8bf5d8/independent_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On both recorded base and exact candidate: actual Glm5NextConfig top-level/text-level disabled states returned zero; a non-DSA architecture with sharing true returned zero; enabled widths matched independent arithmetic; invalid index_kpool=0 still asserted; missing sharing returned zero."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7dc4bb8bf5d8/venv/bin/python -c '<construct reported Glm5NextConfig and call legacy get_dsa_index_topk path>'",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original AssertionError operation with index_topk=None and index_share_for_mtp_iteration=True. The current get_dsa_seed_metadata_dim guard avoids this call and returns zero."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-7dc4bb8bf5d8/pre-commit /opt/venv/bin/pre-commit run --files test/registered/unit/disaggregation/test_dsa_seed_metadata_dim.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository checks passed, including Ruff, formatting, and registered-test CI validation."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The affected helper is CPU configuration logic. Read-only inventory found one AMD Instinct MI355X gfx950; no GPU kernel was used as evidence for the scheduler-sizing contract.",
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only a Python test and report artifacts; no native source or generated native library changed.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The candidate itself does not alter production behavior, so fully_resolves_original is false for the candidate contribution; the full behavioral fix is already in its base.",
+    "The candidate PR body and committed report reference mirror issue 1140 instead of the reviewed mirror issue 1227.",
+    "GLM-5.3-Flash-NVFP4 weights were unavailable; no full-model or HTTP serving run was performed.",
+    "The available gfx950 GPU cannot validate NVIDIA GB10 sm_121 kernel limitations.",
+    "No TP2/EP2 or multi-node workload was run."
+  ]
+}
