@@ -1,0 +1,190 @@
+diff --git a/python/sglang/srt/parser/reasoning_parser.py b/python/sglang/srt/parser/reasoning_parser.py
+index f2c5541..1c090c5 100644
+--- a/python/sglang/srt/parser/reasoning_parser.py
++++ b/python/sglang/srt/parser/reasoning_parser.py
+@@ -122,6 +122,24 @@ class BaseReasoningFormatDetector:
+             self._detect_and_parse_impl(text)
+         )
+ 
++    def _split_at_think_start(self, text: str) -> Tuple[str, str]:
++        """Remove the first opening marker and split off preceding content.
++
++        If reasoning was already opened by the chat template, text before an
++        echoed marker remains reasoning. Otherwise, the marker opens the block
++        and preceding text is normal content.
++        """
++        think_start_text = self.think_start_token + self.think_start_self_label
++        start_idx = text.find(think_start_text)
++        if start_idx <= 0:
++            return text, ""
++
++        preceding = text[:start_idx]
++        rest = text[start_idx + len(think_start_text) :]
++        if self._in_reasoning:
++            return preceding + rest, ""
++        return rest, preceding
++
+     def _detect_and_parse_impl(self, text: str) -> StreamingParseResult:
+         in_reasoning = self._in_reasoning or self.think_start_token in text
+ 
+@@ -130,7 +148,7 @@ class BaseReasoningFormatDetector:
+ 
+         # The text is considered to be in a reasoning block.
+         think_start_text = self.think_start_token + self.think_start_self_label
+-        processed_text = text
++        processed_text, leading_normal_text = self._split_at_think_start(text)
+         while processed_text.startswith(think_start_text):
+             processed_text = processed_text[len(think_start_text) :]
+ 
+@@ -148,25 +166,29 @@ class BaseReasoningFormatDetector:
+                 tool_idx = processed_text.find(self.tool_start_token)
+                 reasoning_text = processed_text[:tool_idx]
+                 # Preserve tool_start_token in normal text
+-                normal_text = processed_text[tool_idx:]
++                normal_text = leading_normal_text + processed_text[tool_idx:]
+                 return StreamingParseResult(
+                     normal_text=normal_text, reasoning_text=reasoning_text
+                 )
+             # Assume reasoning was truncated before end token
+-            return StreamingParseResult(reasoning_text=processed_text)
++            return StreamingParseResult(
++                normal_text=leading_normal_text, reasoning_text=processed_text
++            )
+ 
+         # Extract reasoning content
+         if self.think_end_token in processed_text:
+             splits = processed_text.split(self.think_end_token, maxsplit=1)
+             reasoning_text = splits[0]
+-            normal_text = splits[1]
++            normal_text = leading_normal_text + splits[1]
+ 
+             return StreamingParseResult(
+                 normal_text=normal_text, reasoning_text=reasoning_text
+             )
+         else:
+             # think_end_token is in self.previous_content for continue_final_message=True case
+-            return StreamingParseResult(normal_text=processed_text)
++            return StreamingParseResult(
++                normal_text=leading_normal_text + processed_text
++            )
+ 
+     def parse_streaming_increment(self, new_text: str) -> StreamingParseResult:
+         """
+@@ -203,8 +225,14 @@ class BaseReasoningFormatDetector:
+             return StreamingParseResult()
+ 
+         # Strip `<think>` token if present
++        leading_normal_text = ""
+         if not self.stripped_think_start and think_start_text in current_text:
+-            current_text = current_text.replace(think_start_text, "", 1)
++            if self._in_reasoning:
++                current_text = current_text.replace(think_start_text, "", 1)
++            else:
++                start_idx = current_text.find(think_start_text)
++                leading_normal_text = current_text[:start_idx]
++                current_text = current_text[start_idx + len(think_start_text) :]
+             # Write back, or stream_reasoning=False carries the token into finish().
+             self._buffer = current_text
+             self.stripped_think_start = True
+@@ -218,7 +246,10 @@ class BaseReasoningFormatDetector:
+ 
+             self._buffer = ""
+             self._in_reasoning = False
+-            normal_text = current_text[end_idx + len(self.think_end_token) :]
++            normal_text = (
++                leading_normal_text
++                + current_text[end_idx + len(self.think_end_token) :]
++            )
+ 
+             return StreamingParseResult(
+                 normal_text=normal_text, reasoning_text=reasoning_text
+@@ -232,7 +263,7 @@ class BaseReasoningFormatDetector:
+                 tool_idx = current_text.find(self.tool_start_token)
+                 reasoning_text = current_text[:tool_idx]
+                 # Preserve tool_start_token in normal text
+-                normal_text = current_text[tool_idx:]
++                normal_text = leading_normal_text + current_text[tool_idx:]
+                 self._buffer = ""
+                 self._in_reasoning = False
+                 return StreamingParseResult(
+@@ -252,15 +283,22 @@ class BaseReasoningFormatDetector:
+                 )
+                 self._buffer = current_text[len(current_text) - holdback :]
+                 return StreamingParseResult(
++                    normal_text=leading_normal_text,
+                     reasoning_text=current_text[: len(current_text) - holdback]
+                 )
+             else:
+-                return StreamingParseResult()
++                return StreamingParseResult(normal_text=leading_normal_text)
+ 
+         # If we're not in a reasoning block return as normal text
+         if not self._in_reasoning:
+-            self._buffer = ""
+-            return StreamingParseResult(normal_text=current_text)
++            holdback = (
++                self._ends_with_partial_token(current_text, think_start_text)
++                if not self.stripped_think_start
++                else 0
++            )
++            cut = len(current_text) - holdback
++            self._buffer = current_text[cut:]
++            return StreamingParseResult(normal_text=current_text[:cut])
+ 
+         return StreamingParseResult()
+ 
+diff --git a/test/registered/unit/parser/test_reasoning_parser.py b/test/registered/unit/parser/test_reasoning_parser.py
+index a23935c..95c9b2b 100644
+--- a/test/registered/unit/parser/test_reasoning_parser.py
++++ b/test/registered/unit/parser/test_reasoning_parser.py
+@@ -1122,25 +1122,35 @@ class TestStreamingChunkSizeInvariance(CustomTestCase):
+                         self._feed(DeepSeekR1Detector(), text, chunk_size), expected
+                     )
+ 
+-    def test_text_before_think_token_is_chunk_dependent(self):
+-        """Accepted divergence, inherited from main: text before `<think>` lands
+-        in reasoning or content depending on where the chunk boundary falls."""
+-        text = "lead<think>r</think>tail"
+-        variants = {
+-            self._feed(Qwen3Detector(), text, chunk_size)
+-            for chunk_size in self.CHUNK_SIZES
+-        }
++    def test_text_before_think_token_is_content(self):
++        self._assert_invariant(
++            Qwen3Detector,
++            "lead<think>r</think>tail",
++            ("r", "leadtail"),
++        )
+ 
+-        self.assertEqual(
+-            variants,
+-            {("r", "leadtail"), ("", text), ("leadr", "tail")},
++    def test_single_leading_newline_before_think_token(self):
++        self._assert_invariant(
++            Qwen3Detector,
++            "\n<think>r</think>tail",
++            ("r", "\ntail"),
+         )
+-        # And the non-streaming path produces yet a fourth split.
+-        one_shot = Qwen3Detector().detect_and_parse(text)
+-        self.assertEqual(
+-            (one_shot.reasoning_text, one_shot.normal_text), ("lead<think>r", "tail")
++
++    def test_forced_reasoning_keeps_lead_text_as_reasoning(self):
++        self._assert_invariant(
++            DeepSeekR1Detector,
++            "lead<think>r</think>tail",
++            ("leadr", "tail"),
+         )
+ 
++    def test_content_ending_in_start_token_prefix_survives(self):
++        for chunk_size in self.CHUNK_SIZES:
++            with self.subTest(chunk_size=chunk_size):
++                self.assertEqual(
++                    self._feed(Qwen3Detector(), "answer <", chunk_size),
++                    ("", "answer <"),
++                )
++
+     def test_dsv4_reasoning_quoting_dsml_is_chunk_dependent(self):
+         """Accepted divergence: streaming ends the block at the DSML marker, while
+         one-shot waits to see whether a `</think>` follows. Reachable because the
