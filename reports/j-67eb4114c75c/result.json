@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34709",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the benchmark endpoint's inherited accelerator-context failure on the assigned gfx950 GPU and changed only the outer server process to use an explicit spawn context. Added a failing-before/passing-after process-context regression and independent reuse/connect boundary tests.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-67eb4114c75c/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_endpoint.py (original multiprocessing.Process line)",
+      "exit_code": 1,
+      "what_was_measured": "The new regression rejected the default fork path because multiprocessing.get_context('spawn') was not called; the two independent reuse/connect boundary tests passed. Raw output: reports/j-67eb4114c75c/raw/unit_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67eb4114c75c/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_endpoint.py",
+      "exit_code": 0,
+      "what_was_measured": "All three focused tests passed: explicit spawn for launch, no process creation when reusing a live server, and no launch when an explicit base URL is supplied. Raw output: reports/j-67eb4114c75c/raw/unit_after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67eb4114c75c/venv/bin/python /tmp/amdpilot-repo-j-67eb4114c75c/repro_endpoint_fork.py (original multiprocessing.Process line)",
+      "exit_code": 1,
+      "what_was_measured": "After the parent initialized ROCm, the forked child failed its real GPU allocation with 'Cannot re-initialize CUDA in forked subprocess'; launch_or_reuse_server reported the child exit. Raw output: reports/j-67eb4114c75c/raw/repro_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-67eb4114c75c/venv/bin/python reports/j-67eb4114c75c/repro_endpoint_gpu.py",
+      "exit_code": 0,
+      "what_was_measured": "After parent ROCm initialization, the spawned child independently allocated a GPU tensor, computed 7.0, and was alive when the endpoint became ready. Raw output: reports/j-67eb4114c75c/raw/repro_final.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X gfx950:sramecc+:xnack- was used with torch 2.11.0+rocm7.2 and HIP 7.2.26015. Inventory is in reports/j-67eb4114c75c/raw/gpu_inventory.txt; before/after allocation evidence is in repro_before.txt and repro_after.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No Qwen/Qwen3.5-9B weights were available, so no full model startup or semantic inference was run.",
+    "The fixture validates the benchmark endpoint process boundary and real ROCm accelerator execution only; it does not qualify multimodal image preprocessing or a distributed workload.",
+    "NVIDIA CUDA and Intel XPU hardware were unavailable, so those vendor-specific paths were not executed.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}
