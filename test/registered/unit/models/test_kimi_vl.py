@@ -16,7 +16,7 @@ from sglang.srt.managers.schedule_batch import Modality, MultimodalDataItem
 from sglang.srt.models.kimi_vl import KimiVLForConditionalGeneration
 from sglang.srt.models.kimi_vl_moonvit import MoonVitEncoderLayer
 from sglang.srt.multimodal.mm_utils import run_dp_sharded_mrope_vision_model
-from sglang.srt.runtime_context import get_context, get_parallel
+from sglang.srt.runtime_context import get_context, get_flags, get_parallel
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -95,6 +95,30 @@ class TestKimiVLEncoderParallelism(CustomTestCase):
         self.assertIsInstance(layer.attn.proj, RowParallelLinear)
         self.assertIsInstance(layer.mlp.fc0, ColumnParallelLinear)
         self.assertIsInstance(layer.mlp.fc1, RowParallelLinear)
+
+    def test_moonvit_reduction_group_matches_dp_attention(self):
+        for dp_attention_enabled in (True, False):
+            with (
+                self.subTest(dp_attention_enabled=dp_attention_enabled),
+                get_flags().dp.override(enabled=dp_attention_enabled),
+                get_parallel().override(
+                    tp_size=4, tp_rank=0, attn_tp_size=2, attn_tp_rank=0
+                ),
+                get_context().override_server_args(),
+            ):
+                layer = MoonVitEncoderLayer(
+                    num_heads=4,
+                    hidden_dim=16,
+                    mlp_dim=32,
+                    prefix="vision_tower.encoder.blocks.0",
+                )
+
+                self.assertEqual(
+                    layer.attn.proj.use_dp_attention_reduce, dp_attention_enabled
+                )
+                self.assertEqual(
+                    layer.mlp.fc1.use_dp_attention_reduce, dp_attention_enabled
+                )
 
     def test_encoder_dp_uses_existing_mrope_sharding_helper(self):
         model = _bare_model(use_data_parallel=True)

@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34442",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Confirmed in the prepared source that Kimi-VL MoonViT shards its MLP and attention output projections by attn_tp_size while leaving both RowParallelLinear reductions on the default global TP group. Routed both reductions through the DP-attention TP group when DP attention is enabled. A constructor-level regression failed before the fix and passes after it, including the non-DP boundary case.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6fee7184e557/venv/bin/python -m pytest -q 'test/registered/unit/models/test_kimi_vl.py::TestKimiVLEncoderParallelism::test_moonvit_reduction_group_matches_dp_attention' (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Issue-specific pre-fix regression: with tp_size=4, attn_tp_size=2, and DP attention enabled, MoonViT's attention output projection retained use_dp_attention_reduce=False. The DP-disabled boundary subtest passed. Raw output: reports/j-6fee7184e557/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6fee7184e557/venv/bin/python -m pytest -q 'test/registered/unit/models/test_kimi_vl.py::TestKimiVLEncoderParallelism::test_moonvit_reduction_group_matches_dp_attention'",
+      "exit_code": 0,
+      "what_was_measured": "Both MoonViT RowParallelLinear sites select the DP-attention reducer when enabled and retain the global TP reducer when disabled; 1 test and 2 subtests passed. Raw output: reports/j-6fee7184e557/raw/passing-after-target.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6fee7184e557/venv/bin/python -m pytest -q test/registered/unit/models/test_kimi_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "The complete Kimi-VL encoder-parallelism unit file passed: 5 tests and 2 subtests. Raw output: reports/j-6fee7184e557/raw/test-kimi-vl-full.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/models/kimi_vl_moonvit.py test/registered/unit/models/test_kimi_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, credential, and registered-test validation hooks passed. Raw output: reports/j-6fee7184e557/raw/pre-commit.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors. Raw output: reports/j-6fee7184e557/raw/diff-check.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned host exposes exactly one AMD Instinct MI355X gfx950 GPU. The reported failure requires at least TP4/DP2 and Kimi-VL weights, which were not available; no single-GPU smoke was substituted for distributed evidence. Inventory: reports/j-6fee7184e557/raw/gpu-inventory.log"
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original Kimi-VL HTTP serving deadlock was not reproduced end-to-end because only one GPU was assigned and the Kimi-VL weights were unavailable.",
+    "The regression verifies actual MoonViT construction and both reducer-selection flags, but it cannot execute a TP4/DP2 collective schedule on one GPU.",
+    "No model semantic or numerical accuracy claim is made; this change only corrects communicator selection.",
+    "Upstream PR https://github.com/sgl-project/sglang/pull/35831 independently proposes the same two source changes and remained open/review-required when inspected."
+  ]
+}
