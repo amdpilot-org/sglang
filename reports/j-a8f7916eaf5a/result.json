@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34112",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1756",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1719",
+  "candidate_commit": "eba02374b616ef4a417dded3b89b1b36f0fc84c4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate proves and fixes the ordinary current-main delayed final-prefill abort token race, but an independent beam-group final-prefill cancellation still enters beam commit before the abort-drop branch. The original negative scheduler output-id symptom and HTTP/model workload were not reproduced in the available ROCm environment.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a8f7916eaf5a/venv/bin/python -m pytest -q <externally archived candidate test_scheduler_chunked_req_gate.py> <externally archived candidate test_batch_result_processor_hidden_states.py>",
+      "exit_code": 1,
+      "what_was_measured": "Recorded base failing-before: 3 failed, 11 passed, 2 subtests passed. The failures showed cancelled-prefill optimistic-decode admission, output_ids [101], and sampling-mask finish precedence over the pending abort."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-a8f7916eaf5a/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py test/registered/unit/managers/test_batch_result_processor_hidden_states.py test/registered/unit/managers/test_scheduler_chunked_abort_race.py test/registered/unit/managers/test_batch_result_processor_spec_grammar.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate commit regression and adjacent scheduler/result compatibility coverage: 22 passed, 2 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a8f7916eaf5a/venv/bin/python -m pytest -q <external adversarial module>::TestPrefillHiddenStateOffsets::test_pending_abort_wins_over_beam_prefill_commit",
+      "exit_code": 1,
+      "what_was_measured": "Independent counterexample: an aborted final-prefill beam request called beam_coordinator.commit_prefill(req, up_to_tick=7), bypassing the candidate's later drop_prefill_result branch."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-a8f7916eaf5a/venv/bin/python -c '<print scheduler/result processor __file__, Torch/HIP version, device and ISA>'",
+      "exit_code": 0,
+      "what_was_measured": "Imports resolved to /job/repo/python sources. Environment reported Torch 2.11.0+rocm7.2, HIP 7.2.26015, AMD Instinct MI350X, gfx950:sramecc+:xnack-."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The assigned gfx950 GPU was enumerated through the prepared Torch/ROCm interpreter. Issue-specific model execution was not performed; the regressions are scheduler/result control-flow tests."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A cancelled final-prefill request with beam_group set still invokes beam_coordinator.commit_prefill before the candidate's drop_prefill_result branch.",
+    "No candidate regression measures or rules out negative scheduler output_ids in the reported serving workload."
+  ],
+  "remaining_limitations": [
+    "The reported meta-llama/Llama-3.2-1B-Instruct weights were unavailable, so the original HTTP workload was not rerun.",
+    "The available GPU was AMD gfx950 rather than NVIDIA RTX 4090/CUDA; no CUDA-specific claim is made.",
+    "The issue-specific tests did not execute a model on GPU.",
+    "Current main no longer has the old scheduler batch representation described by the report, leaving the negative output-id symptom unverified rather than disproved.",
+    "No multi-rank, pipeline-parallel, or disaggregated runtime validation was performed.",
+    "No native source changed in the candidate, so no native rebuild was applicable."
+  ]
+}
