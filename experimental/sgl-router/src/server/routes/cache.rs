@@ -6,7 +6,7 @@
 use crate::server::app_context::AppContext;
 use crate::workers::worker::Worker;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::{self, StreamExt};
@@ -84,7 +84,21 @@ impl FlushCacheResult {
 /// Status: `200 OK` when every worker flushed successfully (or the fleet is
 /// empty); `502 BAD_GATEWAY` when at least one worker failed. The JSON body
 /// always carries the full breakdown so a partial failure is actionable.
-pub async fn flush_cache(State(ctx): State<Arc<AppContext>>) -> Response {
+pub async fn flush_cache(State(ctx): State<Arc<AppContext>>, headers: HeaderMap) -> Response {
+    if let Some(admin_api_key) = ctx.config.server.admin_api_key.as_deref() {
+        let expected = format!("Bearer {admin_api_key}");
+        let authorized = headers
+            .get(header::AUTHORIZATION)
+            .is_some_and(|value| value.as_bytes() == expected.as_bytes());
+        if !authorized {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Bearer")],
+            )
+                .into_response();
+        }
+    }
+
     let workers = ctx.registry.all();
     let total_workers = workers.len();
 
@@ -192,6 +206,7 @@ mod tests {
     use axum::Router;
     use http_body_util::BodyExt;
     use serde_json::Value;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tower::ServiceExt;
@@ -202,6 +217,38 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let app = Router::new().route("/flush_cache", post(move || async move { status }));
+        let (tx, rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = rx.await;
+                })
+                .await;
+        });
+        (format!("http://127.0.0.1:{port}"), tx)
+    }
+
+    async fn spawn_counting_flush_worker(
+        calls: Arc<AtomicUsize>,
+        authorization_seen: Arc<AtomicBool>,
+    ) -> (String, oneshot::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = Router::new().route(
+            "/flush_cache",
+            post(move |headers: HeaderMap| {
+                let calls = Arc::clone(&calls);
+                let authorization_seen = Arc::clone(&authorization_seen);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    authorization_seen.store(
+                        headers.contains_key(header::AUTHORIZATION),
+                        Ordering::SeqCst,
+                    );
+                    StatusCode::OK
+                }
+            }),
+        );
         let (tx, rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app)
@@ -238,21 +285,73 @@ mod tests {
     }
 
     async fn post_flush(ctx: Arc<AppContext>) -> (StatusCode, Value) {
+        post_flush_with_authorization(ctx, None).await
+    }
+
+    async fn post_flush_with_authorization(
+        ctx: Arc<AppContext>,
+        authorization: Option<&str>,
+    ) -> (StatusCode, Value) {
         let app = crate::server::app::build_router(ctx);
+        let mut request = Request::builder().method("POST").uri("/flush_cache");
+        if let Some(value) = authorization {
+            request = request.header(header::AUTHORIZATION, value);
+        }
         let res = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/flush_cache")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
         let status = res.status();
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap()
+        };
         (status, body)
+    }
+
+    #[tokio::test]
+    async fn configured_admin_key_rejects_unauthorized_before_fan_out() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let authorization_seen = Arc::new(AtomicBool::new(false));
+        let (url, _shutdown) =
+            spawn_counting_flush_worker(Arc::clone(&calls), Arc::clone(&authorization_seen)).await;
+        let mut ctx = ctx_with_workers(&[&url]);
+        Arc::get_mut(&mut ctx).unwrap().config.server.admin_api_key = Some("secret-key".into());
+
+        for authorization in [
+            None,
+            Some("secret-key"),
+            Some("Basic secret-key"),
+            Some("Bearer wrong-key"),
+        ] {
+            let (status, body) =
+                post_flush_with_authorization(Arc::clone(&ctx), authorization).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            assert_eq!(body, Value::Null);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!authorization_seen.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn configured_admin_key_allows_exact_bearer_credential() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let authorization_seen = Arc::new(AtomicBool::new(false));
+        let (url, _shutdown) =
+            spawn_counting_flush_worker(Arc::clone(&calls), Arc::clone(&authorization_seen)).await;
+        let mut ctx = ctx_with_workers(&[&url]);
+        Arc::get_mut(&mut ctx).unwrap().config.server.admin_api_key = Some("secret-key".into());
+
+        let (status, body) = post_flush_with_authorization(ctx, Some("Bearer secret-key")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_workers"], 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            !authorization_seen.load(Ordering::SeqCst),
+            "inbound admin credential must not be forwarded to workers"
+        );
     }
 
     #[tokio::test]

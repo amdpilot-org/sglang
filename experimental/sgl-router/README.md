@@ -79,6 +79,22 @@ The legacy `--cache-threshold`, `--balance-abs-threshold`, and
 one-to-one replacements; remove them and review the current `sgl-router
 --help` output when tuning Cache-Aware routing.
 
+## Admin endpoint authentication
+
+`POST /flush_cache` remains unauthenticated by default for compatibility.
+To protect this fleet-wide operation, start the router with
+`--admin-api-key <key>` and send the same key as a bearer credential:
+
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer <key>' \
+  http://127.0.0.1:30000/flush_cache
+```
+
+The admin key authenticates requests arriving at the router only. It is not
+forwarded to workers and is separate from headers used by proxied inference
+requests.
+
 ## License
 
 Apache-2.0.

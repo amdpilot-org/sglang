@@ -247,6 +247,9 @@ impl std::fmt::Display for StickyFallbackKind {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    /// Optional inbound credential for router administration endpoints.
+    /// This is deliberately separate from credentials forwarded to workers.
+    pub admin_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -40,6 +40,10 @@ pub struct Cli {
     /// Port to bind the HTTP server to.
     #[arg(long, default_value_t = 30000)]
     pub port: u16,
+    /// Require `Authorization: Bearer <key>` on router admin endpoints.
+    /// When omitted, admin endpoints remain unauthenticated for compatibility.
+    #[arg(long)]
+    pub admin_api_key: Option<String>,
 
     // ---- model (exactly one) ----
     /// Model id this router serves (the OpenAI `model` field).
@@ -228,6 +232,14 @@ impl Cli {
     /// [`Config::validate`] for the remaining value-level invariants
     /// (model id, static worker URLs).
     pub fn into_config(self) -> Result<Config> {
+        if let Some(key) = self.admin_api_key.as_deref() {
+            if key.is_empty() {
+                return Err(anyhow!("--admin-api-key must be non-empty"));
+            }
+            axum::http::HeaderValue::try_from(format!("Bearer {key}"))
+                .map_err(|_| anyhow!("--admin-api-key must be valid in an HTTP header"))?;
+        }
+
         let discovery = self.build_discovery()?;
         let bucket_config = self
             .bucket_config
@@ -581,6 +593,7 @@ impl Cli {
             server: ServerConfig {
                 host: self.host,
                 port: self.port,
+                admin_api_key: self.admin_api_key,
             },
             observability: ObservabilityConfig {
                 log_level: self.log_level,
@@ -720,6 +733,44 @@ mod tests {
     fn into_config_owned(args: Vec<String>) -> Result<Config> {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         into_config(&refs)
+    }
+
+    #[test]
+    fn admin_api_key_is_optional_and_separate_from_proxy_config() {
+        let without_key =
+            into_config_owned(with_model(&["--worker-urls", "http://x:30000"])).unwrap();
+        assert_eq!(without_key.server.admin_api_key, None);
+
+        let with_key = into_config_owned(with_model(&[
+            "--worker-urls",
+            "http://x:30000",
+            "--admin-api-key",
+            "router-secret",
+        ]))
+        .unwrap();
+        assert_eq!(
+            with_key.server.admin_api_key.as_deref(),
+            Some("router-secret")
+        );
+        assert_eq!(
+            with_key.proxy.request_timeout_secs,
+            default_proxy_request_timeout_secs()
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_invalid_admin_api_key() {
+        for key in ["", "line\nbreak"] {
+            let err = into_config_owned(with_model(&[
+                "--worker-urls",
+                "http://x:30000",
+                "--admin-api-key",
+                key,
+            ]))
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("--admin-api-key"), "got: {err}");
+        }
     }
 
     #[test]
