@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2622",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2620",
+  "candidate_commit": "208bb69de35875426937fbf28ec209ed4f0c251c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes the two inherited review counterexamples and passes its parser regression suite, but independent adversarial cases show that the streaming safety valve can emit partial tool deltas before duplicating the payload as normal text, and a literal end-marker token inside a valid JSON string truncates streaming arguments.",
+  "tests": [
+    {
+      "command": "git switch --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7744daa0edeb/venv/bin/python /job/review_harness.py",
+      "exit_code": 0,
+      "what_was_measured": "Actual prepared-base parser import and behavior. Reproduced zero calls/content leakage for singular section markers and the 269-character retained buffer after a complete first call plus oversized unclosed second call."
+    },
+    {
+      "command": "git switch --detach 208bb69de35875426937fbf28ec209ed4f0c251c && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7744daa0edeb/venv/bin/python /job/review_harness.py",
+      "exit_code": 0,
+      "what_was_measured": "Verified both named fixes and independently measured multi-increment overflow duplication/mixed output plus streaming truncation when valid JSON contains a literal tool-call end marker. Confirmed the loaded source path was /job/repo/python/sglang/srt/function_call/kimik2_detector.py."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-7744daa0edeb/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 70 passed, 7 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed change is deterministic Python parser logic; no GPU kernel or model execution is involved in the reproduced contracts."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With SGLANG_KIMI_PARSER_SECTION_MAX=128, stream one unclosed call as a header plus 20 x characters, then 20 y characters, then 100 z characters. The candidate emits the x/y argument deltas, then flushes the entire stripped call (including x/y again) as normal_text when the limit is crossed. The already emitted partial tool call cannot be retracted.",
+    "A complete streaming call whose valid JSON string value contains the literal <|tool_call_end|> token is cut at that substring. The call parameters become truncated invalid JSON and the remaining JSON suffix is emitted as normal_text, although detect_and_parse handles the same wire text correctly."
+  ],
+  "remaining_limitations": [
+    "No real Kimi model weights or HTTP serving path were exercised; model-semantic and end-to-end behavior remain unverified.",
+    "No GPU execution was performed. The assigned gfx950 architecture is irrelevant to this Python-only parser review and cannot substitute for unavailable Kimi model validation.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}
