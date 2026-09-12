@@ -1166,12 +1166,19 @@ class PrefillAdder:
         if paged_input > min(self.cur_rem_tokens, self.rem_total_tokens):
             return AddReqResult.NO_TOKEN
         if self.is_hybrid_swa:
+            max_new_tokens = self._swa_new_tokens(req)
             if (
-                self._swa_budget_for_req(
-                    cand_extend_input_len, self._swa_new_tokens(req)
-                )
+                self._swa_budget_for_req(cand_extend_input_len, max_new_tokens)
                 > self.rem_swa_tokens
             ):
+                # Prefix-cache-disabled ignore_eos admission does not support
+                # chunked prefill. If the complete request cannot fit even
+                # after transient SWA pressure drains, deferring it can never
+                # make progress and would pin the FCFS queue indefinitely.
+                if self._swa_req_never_fits(
+                    cand_extend_input_len, max_new_tokens
+                ):
+                    return self._reject_swa_req(req, max_new_tokens)
                 return AddReqResult.NO_TOKEN
 
         def add_req_state(r, insert_sort=False):

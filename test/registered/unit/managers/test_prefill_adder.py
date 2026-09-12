@@ -1035,6 +1035,37 @@ class TestPrefillAdder(CustomTestCase):
         self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
         self.assertIn("capacity=512 tokens", adder.rejected_reqs[0][1])
 
+    def test_ignore_eos_intrinsically_oversized_swa_req_is_rejected(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=512
+        )
+        self.mock_tree_cache.disable = True
+        req.sampling_params.ignore_eos = True
+
+        for _ in range(3):
+            result = adder.add_one_req(
+                req, has_chunked_req=False, truncation_align_size=None
+            )
+            if result is AddReqResult.REJECT:
+                break
+
+        self.assertIs(result, AddReqResult.REJECT)
+        req.set_extend_range.assert_not_called()
+        self.assertEqual([item[0] for item in adder.rejected_reqs], [req])
+
+    def test_ignore_eos_swa_req_under_transient_pressure_still_defers(self):
+        adder, req = self._build_dsv4_issue_req(
+            prompt_len=2_000, rem_swa=512, size_swa=4_096
+        )
+        self.mock_tree_cache.disable = True
+        req.sampling_params.ignore_eos = True
+
+        self.assertIs(
+            adder.add_one_req(req, has_chunked_req=False, truncation_align_size=None),
+            AddReqResult.NO_TOKEN,
+        )
+        self.assertEqual(adder.rejected_reqs, [])
+
     def test_intrinsically_oversized_swa_req_rejects_below_one_page_cap(self):
         # 1,023 free tokens leave 510 after decode/page headroom: positive, but
         # still less than one 512-token page and therefore not a usable chunk.
