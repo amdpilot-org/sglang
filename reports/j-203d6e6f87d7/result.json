@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35270",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independently verified candidate b12ae4a2681706a9ab161b2d432808f8f9f9ce86. On the recorded base, the candidate regression reproduced duplicate physical-page ownership: classic and unified radix caches each accounted for 128 tokens while referencing only 96 tokens of distinct pages after two dLLM incomplete-block rewrites. The exact candidate prevents the volatile incomplete block from entering either the classic or current default unified radix tree, passes its focused regression suite, and passes an independent matrix of repeated rewrites with incomplete lengths 1, 17, 31, and 32 followed by block resolution. This fully addresses the original default dLLM radix-cache failure mechanism in the implementations exercised, without changing native code.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-203d6e6f87d7/venv/bin/python -m pytest -q /job/review-evidence-j-203d6e6f87d7/test_dllm_volatile_radix_block.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before candidate regression on recorded base: both classic and unified caches reported 128 accounted tokens for 96 distinct physical-page tokens. Four tests failed as expected because the new API/fix was absent. Raw output: reports/j-203d6e6f87d7/raw/base-candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-203d6e6f87d7/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_dllm_volatile_radix_block.py test/registered/unit/mem_cache/test_radix_cache_unit.py test/registered/unit/mem_cache/test_decode_radix_lock_ref.py (candidate b12ae4a)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and adjacent radix contracts: 54 tests and 61 subtests passed. Raw output: reports/j-203d6e6f87d7/raw/candidate-focused.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python:/job/repo/test /tmp/amdpilot-repo-j-203d6e6f87d7/venv/bin/python -m pytest -q /job/review-evidence-j-203d6e6f87d7/test_dllm_volatile_radix_block.py::DllmVolatileRadixBlockTest::test_adversarial_rewrites_and_resolution (candidate b12ae4a)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial ownership/accounting matrix with three rewrites at incomplete lengths 1, 17, 31, and 32, then resolved-block insertion; one test and four subtests passed. Raw output: reports/j-203d6e6f87d7/raw/candidate-adversarial.log"
+    },
+    {
+      "command": "rocminfo; Python Torch CPU/GPU float32 squared-sum comparison",
+      "exit_code": 0,
+      "what_was_measured": "Assigned GPU availability only: gfx950 / AMD Instinct MI350X, with GPU result 22898102272.0 equal to CPU reference. Raw output: reports/j-203d6e6f87d7/raw/environment-gpu.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A numerical Torch operation ran on the assigned gfx950 and matched the CPU reference. The issue-specific deterministic allocator/tree tests ran on CPU; no full-model GPU serving claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "LLaDA2.1 weights and Ascend 910B3 hardware were unavailable, so the original 256-request HTTP serving workload was not rerun.",
+    "The available host is x86_64 with one AMD Instinct MI350X (gfx950), not the reported aarch64 Ascend environment.",
+    "The candidate changes only Python; no native library rebuild was applicable. Import-path evidence confirms the reviewed modules loaded from /job/repo.",
+    "Experimental C++ radix and legacy standalone SWA/Mamba cache implementations still call get_fill_ids(), but they were not part of the reported/default LLaDA path and were not qualified here; the current default unified cache path, including unified components, is fixed.",
+    "The tiny Llama serving fixture was not used because it cannot exercise the dLLM incomplete-block contract and would be an unrelated transport smoke."
+  ]
+}
