@@ -5,6 +5,7 @@ import torch
 
 from sglang.kernels.jit.utils import get_ci_test_range
 from sglang.kernels.ops.kvcache.mla_buffer import (
+    set_mla_kv_buffer_dcp_sharded_triton,
     set_mla_kv_buffer_triton,
     set_mla_kv_buffer_triton_fp8_quant,
     set_mla_kv_scale_buffer_triton,
@@ -13,6 +14,7 @@ from sglang.kernels.ops.kvcache.set_mla_kv_buffer import (
     can_use_set_mla_kv_buffer,
     set_mla_kv_buffer,
 )
+from sglang.srt.runtime_context import get_parallel
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
 
 register_cuda_ci(est_time=30, stage="base-b-kernel-unit", runner_config="1-gpu-large")
@@ -248,6 +250,78 @@ def test_set_mla_kv_buffer_triton_zero_index_can_be_written_when_skip_disabled()
         rtol=0.0,
         atol=0.0,
     )
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+@pytest.mark.parametrize("with_rope", [False, True])
+def test_set_mla_kv_buffer_dcp_sharded_localizes_virtual_locs(rank, with_rope):
+    """DCP owners write loc//world_size; non-owners leave the row untouched."""
+    world_size = 2
+    # Two owned locs plus one non-owned loc, all within the physical fixture so
+    # the pre-fix raw write fails deterministically without relying on an OOB.
+    loc = torch.tensor([2 + rank, 4 + rank, 7 - rank], device=DEVICE)
+    nope = torch.arange(
+        loc.numel() * TRITON_NOPE_DIM, dtype=torch.float32, device=DEVICE
+    ).reshape(loc.numel(), 1, TRITON_NOPE_DIM)
+    rope = (
+        torch.arange(
+            loc.numel() * TRITON_ROPE_DIM, dtype=torch.float32, device=DEVICE
+        ).reshape(loc.numel(), 1, TRITON_ROPE_DIM)
+        if with_rope
+        else None
+    )
+    total_dim = TRITON_NOPE_DIM + (TRITON_ROPE_DIM if with_rope else 0)
+    kv_buffer = torch.full((8, 1, total_dim), -1.0, device=DEVICE)
+
+    with get_parallel().override(attn_dcp_size=world_size, attn_dcp_rank=rank):
+        set_mla_kv_buffer_dcp_sharded_triton(
+            kv_buffer, loc, nope, rope, reserved_skip_index=-1
+        )
+
+    for source_row, virtual_loc in enumerate(loc.tolist()):
+        local_loc = virtual_loc // world_size
+        if virtual_loc % world_size == rank:
+            expected = nope[source_row, 0]
+            if with_rope:
+                expected = torch.cat((expected, rope[source_row, 0]))
+            torch.testing.assert_close(kv_buffer[local_loc, 0], expected)
+        else:
+            torch.testing.assert_close(
+                kv_buffer[local_loc, 0], torch.full_like(kv_buffer[local_loc, 0], -1)
+            )
+
+
+@pytest.mark.parametrize("with_rope", [False, True])
+def test_set_mla_kv_buffer_dcp_sharded_preserves_default_reserved_slot(with_rope):
+    """The default padding loc must be skipped before DCP localization."""
+    world_size = 2
+    loc = torch.tensor([0, 2], device=DEVICE)
+    nope = torch.full(
+        (loc.numel(), 1, TRITON_NOPE_DIM), float("nan"), device=DEVICE
+    )
+    nope[1] = 2.0
+    rope = (
+        torch.full((loc.numel(), 1, TRITON_ROPE_DIM), float("nan"), device=DEVICE)
+        if with_rope
+        else None
+    )
+    if with_rope:
+        rope[1] = 3.0
+    total_dim = TRITON_NOPE_DIM + (TRITON_ROPE_DIM if with_rope else 0)
+    kv_buffer = torch.full((4, 1, total_dim), -1.0, device=DEVICE)
+    reserved_before = kv_buffer[0].clone()
+
+    with get_parallel().override(attn_dcp_size=world_size, attn_dcp_rank=0):
+        set_mla_kv_buffer_dcp_sharded_triton(kv_buffer, loc, nope, rope)
+
+    torch.testing.assert_close(kv_buffer[0], reserved_before, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        kv_buffer[1, 0, :TRITON_NOPE_DIM], nope[1, 0], rtol=0.0, atol=0.0
+    )
+    if with_rope:
+        torch.testing.assert_close(
+            kv_buffer[1, 0, TRITON_NOPE_DIM:], rope[1, 0], rtol=0.0, atol=0.0
+        )
 
 
 def test_set_mla_kv_buffer_triton_fp8_quant_reserved_skip_index():

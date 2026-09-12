@@ -1053,6 +1053,8 @@ class DeepseekSparseAttnBackend(
                 kv_cache_capacity = (
                     self.token_to_kv_pool.size + self.token_to_kv_pool.page_size
                 )
+                if get_parallel().dcp_enabled:
+                    kv_cache_capacity *= get_parallel().attn_dcp_size
                 if forward_batch.seq_lens_sum > kv_cache_capacity:
                     max_idx = page_table_1_flattened.max().item()
                     assert max_idx < kv_cache_capacity, (
