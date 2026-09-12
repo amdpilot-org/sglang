@@ -73,19 +73,17 @@ class TestEagerMetadataExtent(CustomTestCase):
             runner._execute_extend(_preplanned_batch(ForwardMode.DRAFT_EXTEND_V2))
         runner.model_runner.model.forward.assert_not_called()
 
-    def test_dsa_accepts_only_fully_padded_kernel_and_kv_extents(self):
+    def test_dsa_accepts_actual_draft_v2_optional_indexer_metadata(self):
         backend = DeepseekSparseAttnBackend.__new__(DeepseekSparseAttnBackend)
         backend.forward_metadata = SimpleNamespace(
             dsa_cache_seqlens_int32=torch.ones(4, dtype=torch.int32),
             dsa_cu_seqlens_k=torch.arange(5, dtype=torch.int32),
             dsa_cu_seqlens_q=torch.arange(5, dtype=torch.int32),
             dsa_seqlens_expanded=torch.ones(4, dtype=torch.int32),
-            token_to_batch_idx=torch.arange(4, dtype=torch.int32),
-            indexer_k_start_end=(
-                torch.arange(4, dtype=torch.int32),
-                torch.arange(4, dtype=torch.int32),
-            ),
+            token_to_batch_idx=None,
+            indexer_k_start_end=None,
             topk_indices_offset=None,
+            paged_mqa_ctx_lens_2d=torch.ones((4, 1), dtype=torch.int32),
         )
         batch = _preplanned_batch(ForwardMode.DRAFT_EXTEND_V2)
         backend.validate_preplanned_metadata_extent(batch)
@@ -109,6 +107,7 @@ class TestEagerMetadataExtent(CustomTestCase):
                 torch.arange(3, dtype=torch.int32),
             ),
             topk_indices_offset=None,
+            paged_mqa_ctx_lens_2d=torch.ones((3, 1), dtype=torch.int32),
         )
 
         with self.assertRaisesRegex(RuntimeError, "expanded_rows=3"):

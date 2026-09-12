@@ -1071,6 +1071,16 @@ class DeepseekSparseAttnBackend(
         indexer_k_start_end, token_to_batch_idx = self._cal_indexer_k_start_end(
             forward_batch, bs_idx_cpu
         )
+        if forward_batch.forward_mode.is_draft_extend_v2():
+            # Metadata is planned before eager attention-TP/DP padding.  Draft-v2
+            # consumes these lengths row-wise in the top-k transform and the
+            # DeepGEMM schedule, so give synthetic physical rows an explicit
+            # zero-length entry.  The draft-v2 indexer does not consume
+            # indexer_k_start_end/token_to_batch_idx (and intentionally leaves
+            # them as None).
+            seqlens_expanded = pad_dsa_cache_seqlens(
+                forward_batch, seqlens_expanded
+            )
         # 1D, expanded seqlens (1D means cheap to compute, so always compute it)
         dsa_cache_seqlens_int32 = compute_dsa_seqlens(
             original_seq_lens=seqlens_expanded,
@@ -1189,6 +1199,12 @@ class DeepseekSparseAttnBackend(
             if metadata is not None and metadata.topk_indices_offset is not None
             else None
         )
+        schedule_rows = (
+            metadata.paged_mqa_ctx_lens_2d.shape[0]
+            if metadata is not None
+            and getattr(metadata, "paged_mqa_ctx_lens_2d", None) is not None
+            else None
+        )
         kv_rows = (
             len(forward_batch.out_cache_loc)
             if forward_batch.out_cache_loc is not None
@@ -1199,9 +1215,12 @@ class DeepseekSparseAttnBackend(
             or dsa_offsets != physical_tokens + 1
             or query_offsets != physical_tokens + 1
             or expanded_rows != physical_tokens
-            or token_batch_rows != physical_tokens
-            or indexer_range_rows != (physical_tokens, physical_tokens)
+            # These are prefill-only indexer inputs. Draft-v2 deliberately
+            # returns None from _cal_indexer_k_start_end().
+            or token_batch_rows != -1
+            or indexer_range_rows != (-1, -1)
             or topk_offset_rows not in (None, physical_tokens)
+            or schedule_rows not in (None, physical_tokens)
             or kv_rows != physical_tokens
         ):
             raise RuntimeError(
@@ -1212,6 +1231,7 @@ class DeepseekSparseAttnBackend(
                 f"token_batch_rows={token_batch_rows}, "
                 f"indexer_range_rows={indexer_range_rows}, "
                 f"topk_offset_rows={topk_offset_rows}, "
+                f"schedule_rows={schedule_rows}, "
                 f"kv_rows={kv_rows}."
             )
 
