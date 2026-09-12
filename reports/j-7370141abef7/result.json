@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/28887",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2496",
+  "candidate_commit": "7497fc4126053b57a6bfd978656697c0ddd858ab",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate is valid test-only hardening on a recorded base that already contains the production guard. At the exact candidate commit, its real-FastAPI _IncludedRouter regression and two boundary tests pass. Temporarily restoring the vulnerable route.path expression makes the new included-router regression fail with the original AttributeError. Independent nested-router and full Prometheus middleware requests also pass. The resulting tree fully prevents the reported HTTP 500, but the candidate must not be credited as the source fix because it changes only tests and review artifacts.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7370141abef7/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py -k GetFastAPIRequestPath",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 7497fc4126053b57a6bfd978656697c0ddd858ab, all three focused regressions passed against the checkout source: real included-router fallback, direct parameterized template, and unmatched path."
+    },
+    {
+      "command": "temporarily change _get_fastapi_request_path to `return route.path, True`, then run /tmp/amdpilot-repo-j-7370141abef7/venv/bin/python -m pytest -q test/registered/unit/utils/test_common.py::TestGetFastAPIRequestPath::test_included_router_without_path_does_not_raise",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before sensitivity: the candidate regression reached a real FastAPI _IncludedRouter and failed at the restored vulnerable expression with AttributeError: '_IncludedRouter' object has no attribute 'path'. The exact candidate source was restored afterward."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7370141abef7/venv/bin/python reports/j-613ab93b6dd6/reproduce_http_middleware.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's retained end-to-end middleware fixture found a full-matching path-less _IncludedRouter, demonstrated that direct .path access raises, then received HTTP 200 and observed sglang:http_requests_total for the request."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7370141abef7/venv/bin/python /job/review-evidence-j-7370141abef7/independent_cases.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial coverage passed for nested included routers, integer converters, query strings, converter rejection, method mismatch, and a real request through the Prometheus middleware. It also confirmed that included-router fallback does not preserve the parameterized route template."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7370141abef7/venv/bin/python -m py_compile test/registered/unit/utils/test_common.py reports/j-613ab93b6dd6/reproduce_http_middleware.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python files compiled and the candidate diff had no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The failure occurs in CPU-side FastAPI route inspection before the handler or model executes. No unrelated GPU smoke was treated as proof. The assigned AMD GPU cannot reproduce the reported four-node Ascend 910b/NPU topology."
+  },
+  "native_rebuilt": false,
+  "source_paths": {
+    "sglang_common": "/job/repo/python/sglang/srt/utils/common.py",
+    "fastapi": "/opt/venv/lib/python3.12/site-packages/fastapi/__init__.py",
+    "starlette": "/opt/venv/lib/python3.12/site-packages/starlette/__init__.py"
+  },
+  "remaining_counterexamples": [
+    "Included-router matches fall back to the concrete request URL, so parameterized requests such as /v2/items/7 and /v2/items/8 create distinct endpoint labels instead of preserving /v2/items/{item_id:int}. This does not reintroduce the reported HTTP 500 but can increase Prometheus cardinality.",
+    "The original four-node Ascend 910b/NPU GLM serving command was not run; model-, NPU-, and distributed-topology-specific behavior remains unverified, although those layers are downstream of the reproduced middleware boundary."
+  ],
+  "remaining_limitations": [
+    "The prepared environment has FastAPI 0.141.1 and Starlette 1.6.0 rather than exactly FastAPI 0.137.0. It exposes the same real _IncludedRouter full-match/no-path behavior described by the issue.",
+    "The original model weights, Ascend hardware, and four-node topology were unavailable. The review qualifies only the HTTP routing and metrics middleware contract.",
+    "No native sources changed between the recorded base and candidate, so there was no native library to rebuild or validate.",
+    "The prepared checkout matched the recorded base before review; there was no image-prepared revision difference."
+  ]
+}
