@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37368",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1087",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1049",
+  "candidate_commit": "0fef25c27168988b4134d86d0e360b20e11937e0",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base deterministically retained overwritten RunAI-marked views at every pending-storage path named by the issue. The exact candidate clones only marked tensors at the FP8-weight, FP8-scale, and gated w1/w3 retention sites. Its regression and independent multi-expert, reverse-order gating, reference-semantics, and gfx950 reusable-buffer cases passed. This is a source fix with regression coverage, not test-only hardening.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-71cfb076a89c/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_nvfp4_online_runai_ownership.py (candidate test file against base source)",
+      "exit_code": 1,
+      "what_was_measured": "On exact base 358c163250ad3b1f62939b01ce1314a0a31a0365, four marked reusable-buffer ownership cases failed (FP8 weight-first, FP8 scale-first, shared expert, and gated w1/w3); the unmarked boundary passed. Raw output: reports/j-71cfb076a89c/base-candidate-regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-71cfb076a89c/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_nvfp4_online_runai_ownership.py reports/j-71cfb076a89c/adversarial_review_test.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 0fef25c27168988b4134d86d0e360b20e11937e0, all five candidate regressions and three independent CPU adversarial cases passed. The independent cases covered two experts retained concurrently from one repeatedly reused FP8 buffer, reverse w3-before-w1 arrival, and a false-marker non-copy boundary. Raw output: reports/j-71cfb076a89c/candidate-focused-adversarial.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-71cfb076a89c/venv/bin/python -m pytest -q reports/j-71cfb076a89c/adversarial_review_test.py::test_marked_fp8_weight_owns_actual_gpu_staging_storage",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X/gfx950, an FP8 tensor view backed by reusable device storage retained its original values after the staging buffer was overwritten. Raw output: reports/j-71cfb076a89c/candidate-gfx950-buffer.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-71cfb076a89c/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_modelopt_nvfp4.py",
+      "exit_code": 0,
+      "what_was_measured": "Six neighboring ModelOpt NVFP4 unit tests passed at the exact candidate. Raw output: reports/j-71cfb076a89c/candidate-neighboring.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One focused tensor-lifetime case executed on the assigned AMD Instinct MI350X/gfx950 through PyTorch ROCm 7.2. It validates device-buffer ownership semantics only, not NVIDIA NVFP4 quantization kernels or a serving workload."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No FP8 MoE checkpoint or full-model semantic-output comparison was available.",
+    "No Kubernetes, distributed RunAI Model Streamer, tensor-parallel-size 8, or multi-node deployment was available.",
+    "The assigned AMD gfx950 GPU cannot qualify the production NVIDIA NVFP4 backend; the GPU case validates only the original reusable-buffer ownership contract.",
+    "The candidate changes Python only; no native C++, CUDA/HIP, or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
