@@ -35,6 +35,7 @@ from sglang.srt.observability.metrics_collector import (
     ExpertDispatchCollector,
     RadixCacheMetricsCollector,
     SchedulerMetricsCollector,
+    StorageMetrics,
     StorageMetricsCollector,
     TokenizerMetricsCollector,
     resolve_collector_class,
@@ -80,6 +81,11 @@ class _RecordingTokenizerMetricsCollector(TokenizerMetricsCollector):
 
 
 class _RecordingStorageMetricsCollector(StorageMetricsCollector):
+    _counter_cls = _RecordingMetric
+    _histogram_cls = _RecordingMetric
+
+
+class _RecordingRadixCacheMetricsCollector(RadixCacheMetricsCollector):
     _counter_cls = _RecordingMetric
     _histogram_cls = _RecordingMetric
 
@@ -180,6 +186,10 @@ class TestDefaultBackend(unittest.TestCase):
 
 
 class TestHiCacheMetrics(unittest.TestCase):
+    @staticmethod
+    def _storage_metrics(prefetch_stats):
+        return StorageMetrics(prefetch_stats=prefetch_stats)
+
     def test_cached_tokens_uses_literal_storage_source(self):
         labels = {"model_name": "test"}
         with get_context().override_server_args(
@@ -221,6 +231,126 @@ class TestHiCacheMetrics(unittest.TestCase):
         self.assertEqual(
             collector.storage_prefetch_unfulfilled_tokens_total.increments,
             [({**labels, "reason": "storage_transfer"}, 4)],
+        )
+
+    def test_storage_prefetch_outcomes_export_monotonic_deltas(self):
+        labels = {"model_name": "test"}
+        collector = _RecordingStorageMetricsCollector(labels=labels)
+
+        first = {
+            "attempts": 3,
+            "issued": 2,
+            "declined_too_short": 1,
+            "declined_anchor_lost": 1,
+            "l3_demand_requests": 2,
+            "l3_hit_requests": 1,
+            "l3_partial_hit_requests": 0,
+            "l3_miss_requests": 1,
+            "l1l2_miss_tokens": 12,
+            "l3_miss_tokens": 4,
+        }
+        collector.log_storage_metrics(self._storage_metrics(first))
+        collector.log_storage_metrics(self._storage_metrics(first))
+
+        second = dict(first)
+        second.update(
+            attempts=4,
+            issued=3,
+            l3_demand_requests=3,
+            l3_partial_hit_requests=1,
+            l1l2_miss_tokens=20,
+            l3_miss_tokens=7,
+        )
+        collector.log_storage_metrics(self._storage_metrics(second))
+
+        # A lower snapshot is a cache reset/new epoch, not a negative delta.
+        collector.log_storage_metrics(
+            self._storage_metrics(
+                {
+                    "attempts": 1,
+                    "issued": 1,
+                    "l3_demand_requests": 1,
+                    "l3_hit_requests": 1,
+                    "l1l2_miss_tokens": 5,
+                    "l3_miss_tokens": 0,
+                }
+            )
+        )
+
+        outcome_totals = {}
+        for metric_labels, value in collector.prefetch_outcomes_total.increments:
+            outcome = metric_labels["outcome"]
+            outcome_totals[outcome] = outcome_totals.get(outcome, 0) + value
+        self.assertEqual(outcome_totals["attempts"], 5)
+        self.assertEqual(outcome_totals["issued"], 4)
+        self.assertEqual(outcome_totals["declined_too_short"], 1)
+        self.assertEqual(outcome_totals["declined_anchor_lost"], 1)
+
+        request_totals = {}
+        for metric_labels, value in collector.storage_requests_total.increments:
+            result = metric_labels["result"]
+            request_totals[result] = request_totals.get(result, 0) + value
+        self.assertEqual(request_totals, {"hit": 2, "partial_hit": 1, "miss": 1})
+
+        token_totals = {}
+        for metric_labels, value in collector.storage_query_tokens_total.increments:
+            result = metric_labels["result"]
+            token_totals[result] = token_totals.get(result, 0) + value
+        self.assertEqual(token_totals, {"hit": 18, "miss": 7})
+
+    def test_storage_prefetch_outcomes_ignore_unknown_keys(self):
+        labels = {"model_name": "test"}
+        collector = _RecordingStorageMetricsCollector(labels=labels)
+        collector.log_storage_metrics(
+            self._storage_metrics({"attempts": 1, "rid-user-controlled": 999})
+        )
+
+        self.assertEqual(
+            collector.prefetch_outcomes_total.increments,
+            [({**labels, "outcome": "attempts"}, 1.0)],
+        )
+
+    def test_cross_tier_transfer_results_use_bounded_labels(self):
+        labels = {"model_name": "test"}
+        collector = _RecordingRadixCacheMetricsCollector(labels=labels)
+
+        collector.increment_transfer_request("l1_to_l2", "success")
+        collector.increment_transfer_request(
+            "l1_to_l2", "failure", "host_capacity"
+        )
+        collector.increment_transfer_request("l2_to_l1", "success")
+
+        self.assertEqual(
+            collector.hicache_transfer_requests.increments,
+            [
+                (
+                    {
+                        **labels,
+                        "direction": "l1_to_l2",
+                        "result": "success",
+                        "reason": "none",
+                    },
+                    1,
+                ),
+                (
+                    {
+                        **labels,
+                        "direction": "l1_to_l2",
+                        "result": "failure",
+                        "reason": "host_capacity",
+                    },
+                    1,
+                ),
+                (
+                    {
+                        **labels,
+                        "direction": "l2_to_l1",
+                        "result": "success",
+                        "reason": "none",
+                    },
+                    1,
+                ),
+            ],
         )
 
 

@@ -7,6 +7,33 @@ SGLang exposes the following metrics via Prometheus. You can enable it by adding
 
 An example of the monitoring dashboard is available in [examples/monitoring/grafana.json](https://github.com/sgl-project/sglang/blob/main/examples/monitoring/grafana/dashboards/json/sglang-dashboard.json).
 
+### HiCache lifecycle diagnostics
+
+With hierarchical cache and storage metrics enabled, the following bounded-label
+counters distinguish an L3 absence from a transfer or admission failure:
+
+- `sglang:hicache_storage_requests_total{result}` classifies each L3 query as
+  `hit`, `partial_hit`, or `miss`.
+- `sglang:hicache_storage_query_tokens_total{result}` counts tokens reported
+  present or absent by L3.
+- `sglang:hicache_prefetch_outcomes_total{outcome}` counts attempted, issued,
+  declined, and revoked prefetches. Outcomes are fixed by the implementation;
+  request IDs are never metric labels.
+- `sglang:hicache_transfer_requests_total{direction,result,reason}` counts
+  completed L1-to-L2 and L2-to-L1 transfers, including decode-retraction
+  backups/restores, plus `host_capacity` and `transfer_error` failures. The
+  label values are implementation-bounded; request IDs remain in logs only.
+- `sglang:storage_prefetch_unfulfilled_tokens_total{reason}` explains storage-hit
+  tokens that were not ultimately usable, including `storage_transfer`, host or
+  device capacity, threshold, shrink, and drop outcomes.
+
+Both `HiRadixCache` and `UnifiedRadixCache` export the L3 query classification.
+Request-correlated L1/L2 lookup, retraction transfers, terminal L2-to-L1
+completion, L3 query, and terminal storage-prefetch records use the structured log
+prefix `[HICACHE] rid=<rid> event=<event> tier=<tier> result=<result>`. Keep the
+`rid` in logs or traces rather than Prometheus labels to avoid unbounded metric
+cardinality.
+
 Here is an example of the metrics:
 
 ```text Output

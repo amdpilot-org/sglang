@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35808",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 2942's valid L1/L2/L3 observability changes and corrected independently reproduced PR 3036 counterexamples. UnifiedRadixCache decode-retraction now reports capacity, success, and transfer-error results in bounded metrics and rid-correlated lifecycle logs. Ordinary UnifiedRadixCache lookup logs classify L1 hit/miss with token counts, asynchronous L2-to-L1 completion is correlated to rid, and unexpected asynchronous transfer exceptions increment failure counters before remaining process errors.",
+  "tests": [
+    {
+      "command": "candidate a6ff9d544d5e1cc56bac200b18cbe425dbed89ad independent recorder probe wrapping test_decode_retraction_backup operations",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before on AMD GPU: real host-capacity rejection and successful target+draft backup/restore both emitted transfer_metric_calls=[]; assertion failed for the missing L1-to-L2 capacity event. Raw output: /job/evidence-before/candidate-adversarial-retraction.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-599eb8310474/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_decode_retraction_backup.py",
+      "exit_code": 0,
+      "what_was_measured": "3 passed on one AMD GPU: real capacity failure metric/log, exact target+draft K/V GPU-host-GPU restoration with success metrics/logs, and injected transfer exception with failure metric/rid log. Raw output: /job/evidence-after-retraction.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-599eb8310474/venv/bin/python -m pytest -q test/registered/unit/observability/test_stat_loggers_di.py",
+      "exit_code": 0,
+      "what_was_measured": "17 collector regressions passed, covering bounded transfer labels and L3 snapshots. Raw output: /job/evidence-after-observability.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-599eb8310474/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_unified_radix_cache_unittest.py -k 'scheduler_hicache_load_back or buffer_only_read_path_roundtrip' -x",
+      "exit_code": 0,
+      "what_was_measured": "16 passed, 60 skipped, 2496 deselected on one AMD GPU; exercised ordinary scheduler load-back and direct file-backed storage/host/GPU round trips. Raw output: /job/evidence-after-unified.log"
+    },
+    {
+      "command": "python -m py_compile python/sglang/srt/mem_cache/unified_radix_cache.py test/registered/unit/mem_cache/test_decode_retraction_backup.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python sources compiled and the complete patch had no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2, HIP 7.2.26015. The regression compared restored target and draft K/V tensors exactly.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native source changed, so a native rebuild was not applicable.",
+    "Mooncake, HF3FS, NIXL, UMBP, multi-node, TP/PP distributed, model-specific storage paths, and NVIDIA/CUDA were unavailable and remain unverified; no source changes were inferred from those unavailable paths.",
+    "The GPU tests validate cache transport and exact fixture K/V restoration, not HTTP serving or model semantic accuracy.",
+    "Unexpected transfer exceptions remain process errors by design; this correction ensures a failure counter and rid log are emitted before re-raising where a request is available. Eviction write-back failures have aggregate metrics but cannot fabricate a request rid."
+  ]
+}

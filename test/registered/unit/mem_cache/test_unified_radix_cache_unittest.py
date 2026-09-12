@@ -3813,7 +3813,18 @@ class UnifiedRadixCacheSuite:
         self.assertTrue(cons.check_prefetch_progress(req_id))
         self.assertEqual(cons.pop_prefetch_loaded_tokens(req_id), len(seq))
         self.assertEqual(stats["l3_demand_requests"], 1)
+        self.assertEqual(stats["l3_hit_requests"], 1)
+        self.assertEqual(stats["l3_partial_hit_requests"], 0)
+        self.assertEqual(stats["l3_miss_requests"], 0)
         self.assertEqual(stats["l3_miss_tokens"], 0)
+        exported_stats = [
+            call.args[0].prefetch_stats
+            for call in cons.storage_metrics_collector.log_storage_metrics.call_args_list
+            if call.args and call.args[0] is not None
+        ]
+        self.assertTrue(
+            any(snapshot.get("l3_hit_requests") == 1 for snapshot in exported_stats)
+        )
 
         # Saturate the device pool with unrelated evictable spans: the
         # load-back must evict, not degrade to recompute (run-2 regression).
