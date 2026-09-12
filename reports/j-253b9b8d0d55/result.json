@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35354",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1500",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1467",
+  "candidate_commit": "483f3961eed46ff578114d2b63d645c97bf82ce9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept the candidate as test-only regression hardening. The recorded base already contains the production dispatch correction and its dspark.py blob is identical in the candidate. The candidate adds focused tests which pass and accurately demonstrate that packed ModelOpt-shaped storage must use quant_method.apply while dense or stale-method heads retain matmul. Independent exact-shape, generic-quantized, unquantized, and gfx950 numerical checks passed. This does not constitute a full reproduction or qualification of the original NVIDIA serving failure.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-253b9b8d0d55/venv/bin/python -m pytest -q test/registered/unit/spec/test_dspark_lm_head_projection.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression at the exact candidate commit: packed ModelOpt W4A16-shaped dispatch, dense dtype-casting fallback, and stale ModelOpt method rejection. Result: 3 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-253b9b8d0d55/venv/bin/python -m pytest -q test/registered/unit/spec/test_dflash_logits.py",
+      "exit_code": 0,
+      "what_was_measured": "Related shared LM-head selector boundaries. Result: 10 passed."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-253b9b8d0d55/venv/bin/python reports/j-46812d215bbf/raw/gpu_projection_command.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate script rerun on the assigned gfx950. Legacy reduced packed matmul failed; dispatch output shape was (245, 1024) and matched an independent dense reference with max_abs_error=0.0."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-253b9b8d0d55/venv/bin/python - (independent adversarial inline script)",
+      "exit_code": 0,
+      "what_was_measured": "Exact reported [245,5120] x [2560,248320] incompatibility using meta tensors, generic callable quantized dispatch, and named-unquantized dense fallback."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..483f3961eed46ff578114d2b63d645c97bf82ce9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X, gfx950:sramecc+:xnack-, with PyTorch 2.11.0+rocm7.2. The synthetic projection dispatch matched its dense reference exactly; this is not NVIDIA NVFP4 kernel evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "No NVIDIA DGX Spark GB10 (SM 12.1) or CUDA 13 environment was available, so the actual ModelOpt NVFP4 kernel was not executed.",
+    "The radixark target and draft 27B weights were unavailable, so the original DSpark CUDA-graph capture and serving command were not run.",
+    "The candidate changes only tests and reports; it does not itself supply the production fix, which was already present on the recorded base.",
+    "The gfx950 mock quantization method validates dispatch and numerical plumbing, not FlashInfer/ModelOpt kernel compatibility, full-model semantics, or distributed execution."
+  ],
+  "remaining_limitations": [
+    "Architecture differs from the report: AMD gfx950/ROCm 7.2 instead of NVIDIA GB10/CUDA 13.",
+    "No native source changed between base and candidate; therefore no native rebuild was applicable.",
+    "The exact-shape failure used meta tensors; GPU execution used reduced dimensions and a mock quantization apply method.",
+    "The candidate PR body cites a different mirror issue number from this review task, although its upstream issue URL is correct."
+  ]
+}
