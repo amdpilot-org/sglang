@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33181",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2494",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2021",
+  "candidate_commit": "a6e013eeacd205cd0f60d4abd624ae8b99deac85",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the Inkling first-block tool-header leak in one-shot and streamed parsing. The exact candidate removes the visible tool name while retaining the correctly parsed tool call for both modes. Its focused regression suite and independent JSON/raw-text, empty-header, chunk-boundary, ordinary-text, and continue_final_message cases pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a16a8a5032dc/venv/bin/python /job/review-evidence-j-a16a8a5032dc/reproduce_inkling_leak.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Actual InklingDetector then FunctionCallParser behavior: missing-opener input leaked visible 'get_weather' in both one-shot and 7-character streamed modes while still producing get_weather({})."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a16a8a5032dc/venv/bin/python /job/review-evidence-j-a16a8a5032dc/reproduce_inkling_leak.py (candidate a6e013eeacd205cd0f60d4abd624ae8b99deac85)",
+      "exit_code": 0,
+      "what_was_measured": "The same parser-chain reproduction produced empty visible content and the correct tool call for missing-opener, explicit-opener, and thinking-first inputs in one-shot and streamed modes."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a16a8a5032dc/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "367 tests and 68 subtests passed on the exact candidate, covering the changed reasoning parser and downstream function-call parser."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a16a8a5032dc/venv/bin/python /job/review-evidence-j-a16a8a5032dc/adversarial_inkling.py",
+      "exit_code": 0,
+      "what_was_measured": "Five independent one-shot cases and fifteen streamed chunking cases passed, including JSON and raw-text tools, empty headers, ordinary text, text preceding a model block, plus immediate continue_final_message output."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The original issue and candidate change are deterministic Python parser logic and require neither model execution nor GPU kernels; no GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full HTTP server or real Inkling model/weights were exercised; this review validates the parser chain that the issue identifies, not model semantic quality or serving infrastructure.",
+    "No native rebuild was applicable because the candidate changes only Python parser code and tests.",
+    "A streamed input ending in an incomplete control-token prefix drops that suffix on finish, but a direct base comparison showed the same pre-existing behavior; it is outside the reported complete tool-invocation contract and is not introduced by the candidate."
+  ]
+}
