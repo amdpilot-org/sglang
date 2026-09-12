@@ -1,5 +1,8 @@
 import concurrent.futures
+import json
+import os
 import sys
+import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
@@ -32,6 +35,131 @@ class _FakeModel:
 
 
 class TestRunaiModelStreamerLoader(CustomTestCase):
+    def _get_streamed_files(self, weight_map, draft_model_idx=1):
+        with tempfile.TemporaryDirectory() as model_dir:
+            files = [
+                os.path.join(model_dir, "target-1.safetensors"),
+                os.path.join(model_dir, "target-2.safetensors"),
+                os.path.join(model_dir, "draft-0.safetensors"),
+                os.path.join(model_dir, "draft-1.safetensors"),
+                os.path.join(model_dir, "draft-shared.safetensors"),
+            ]
+            if weight_map is not None:
+                with open(
+                    os.path.join(model_dir, "model.safetensors.index.json"), "w"
+                ) as index_file:
+                    if isinstance(weight_map, str):
+                        index_file.write(weight_map)
+                    else:
+                        json.dump({"weight_map": weight_map}, index_file)
+
+            load_config = LoadConfig(
+                load_format=LoadFormat.RUNAI_STREAMER,
+                model_loader_extra_config={},
+                draft_model_idx=draft_model_idx,
+            )
+            runai_loader = loader_mod.RunaiModelStreamerLoader(load_config)
+            runai_loader.target_device_str = "cpu"
+            source = runai_loader.Source(model_dir, revision=None)
+
+            with (
+                patch.object(
+                    runai_loader,
+                    "_prepare_weights",
+                    return_value=(model_dir, files),
+                ),
+                patch.object(
+                    loader_mod,
+                    "maybe_add_mtp_safetensors",
+                    side_effect=lambda files, *_args: files,
+                ),
+                patch.object(
+                    weight_utils,
+                    "runai_safetensors_weights_iterator",
+                    return_value=iter(()),
+                ) as mock_iterator,
+            ):
+                list(runai_loader._get_weights_iterator(source))
+
+            return mock_iterator.call_args.args[0], files
+
+    def test_selects_hf_mtp_layer_and_shared_shards_before_streaming(self):
+        selected, files = self._get_streamed_files(
+            {
+                "model.layers.0.weight": "target-1.safetensors",
+                "model.layers.1.weight": "target-2.safetensors",
+                "model.mtp.layers.0.weight": "draft-0.safetensors",
+                "model.mtp.layers.1.weight": "draft-1.safetensors",
+                "model.mtp.shared_head.weight": "draft-shared.safetensors",
+            }
+        )
+
+        self.assertEqual(selected, [files[3], files[4]])
+
+    def test_selects_native_mtp_layer_and_shared_shards_before_streaming(self):
+        selected, files = self._get_streamed_files(
+            {
+                "model.layers.0.weight": "target-1.safetensors",
+                "mtp.0.decoder.weight": "draft-0.safetensors",
+                "mtp.1.decoder.weight": "draft-1.safetensors",
+                "mtp.shared_head.norm.weight": "draft-shared.safetensors",
+            }
+        )
+
+        self.assertEqual(selected, [files[3], files[4]])
+
+    def test_selects_remote_shards_using_cached_object_storage_index(self):
+        model_uri = "s3://bucket/model"
+        files = [
+            f"{model_uri}/target.safetensors",
+            f"{model_uri}/draft-1.safetensors",
+            f"{model_uri}/draft-shared.safetensors",
+        ]
+        with tempfile.TemporaryDirectory() as metadata_dir:
+            with open(
+                os.path.join(metadata_dir, "model.safetensors.index.json"), "w"
+            ) as index_file:
+                json.dump(
+                    {
+                        "weight_map": {
+                            "model.layers.0.weight": "target.safetensors",
+                            "mtp.1.decoder.weight": "draft-1.safetensors",
+                            "mtp.shared_head.weight": "draft-shared.safetensors",
+                        }
+                    },
+                    index_file,
+                )
+
+            with patch(
+                "sglang.srt.utils.runai_utils.ObjectStorageModel.get_path",
+                return_value=metadata_dir,
+            ):
+                selected = loader_mod.RunaiModelStreamerLoader._select_mtp_safetensors(
+                    files, model_uri, 1
+                )
+
+        self.assertEqual(selected, files[1:])
+
+    def test_mtp_shard_selection_falls_back_safely(self):
+        cases = {
+            "missing index": None,
+            "malformed index": "{not-json",
+            "invalid weight map": {"model.mtp.layers.1.weight": 3},
+            "unknown layout": {"model.nextn.layers.1.weight": "draft-1.safetensors"},
+            "indexed shard absent": {
+                "model.mtp.layers.1.weight": "missing.safetensors"
+            },
+            "requested layer absent": {
+                "model.mtp.layers.0.weight": "draft-0.safetensors",
+                "model.mtp.shared.weight": "draft-shared.safetensors",
+            },
+        }
+
+        for label, weight_map in cases.items():
+            with self.subTest(label=label):
+                selected, files = self._get_streamed_files(weight_map)
+                self.assertEqual(selected, files)
+
     def test_passes_quant_config_to_model_init(self):
         quant_config = object()
         fake_model = _FakeModel()
