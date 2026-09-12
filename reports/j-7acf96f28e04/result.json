@@ -1,0 +1,32 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/8540",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Added a default per-processor image count safety limit of 5, an InternVL override of 12, precedence for the existing --limit-mm-data-per-request server argument, early base-loader rejection, and common serving-dispatch validation for processors that bypass the base loader. Invalid configured limits now fail during server argument validation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-7acf96f28e04/venv/bin/python - <<'PY' (assert BaseMultimodalProcessor.IMAGE_NUM_LIMITATION == 5 at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the recorded base had no processor image-count default."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7acf96f28e04/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_image_num_limitation.py test/registered/unit/multimodal/test_base_processor_bad_input.py",
+      "exit_code": 0,
+      "what_was_measured": "20 tests and 26 subtests covering default and processor-specific limits, exact boundaries, lower/higher/zero server overrides, unrelated modality overrides, preprocessed inputs, malformed values, rejection before decode, common serving dispatch, and existing media error classification."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-7acf96f28e04/venv/bin/python -m pre_commit run --files python/sglang/srt/multimodal/processors/base_processor.py python/sglang/srt/multimodal/processors/internvl.py python/sglang/srt/managers/tokenizer_manager.py python/sglang/srt/arg_groups/serving_hook.py test/registered/unit/multimodal/test_image_num_limitation.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, registry, and policy hooks for all changed source and test files."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The feature is a CPU-side request-count validation guard that rejects before image fetch/decode or model execution. No numerical kernel or model output changes were made, so a GPU numerical reference was not applicable.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No model-weight HTTP server run was performed: the deterministic tiny Llama fixture is text-only and cannot qualify multimodal image processing, while the validation behavior is covered at the actual common serving dispatch and processor loader boundaries.",
+    "Only InternVL has a known architecture-specific override (12); all other current processors inherit the requested default of 5. Architecture-specific higher limits were not asserted without model-owner evidence.",
+    "Calls made directly to a custom processor's process_mm_data_async method outside SGLang's serving dispatch are protected only when that processor uses BaseMultimodalProcessor.load_mm_data; the supported serving path validates every registered processor before dispatch.",
+    "No native rebuild was applicable because all changes are Python request validation and tests; no FlyDSL, C++, compiler, ISA, Torch, or ROCm component changed."
+  ]
+}

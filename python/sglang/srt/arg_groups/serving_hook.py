@@ -547,11 +547,17 @@ def handle_other_validations(server_args: Any):
 
         if isinstance(cfg.limit_mm_data_per_request, dict):
             allowed_modalities = {"image", "video", "audio"}
-            for modality in cfg.limit_mm_data_per_request.keys():
+            for modality, limit in cfg.limit_mm_data_per_request.items():
                 if modality not in allowed_modalities:
                     raise ValueError(
                         f"Invalid modality '{modality}' in --limit-mm-data-per-request."
                         f"Allowed modalities are: {list(allowed_modalities)}"
+                    )
+                if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+                    raise ValueError(
+                        f"Invalid limit {limit!r} for modality '{modality}' in "
+                        "--limit-mm-data-per-request. Limits must be "
+                        "non-negative integers."
                     )
 
     # Validate preferred_sampling_params
