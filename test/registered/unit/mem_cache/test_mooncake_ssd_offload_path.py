@@ -98,6 +98,34 @@ def _make_store(storage_config):
 
 
 class TestMooncakeSsdOffloadPath(unittest.TestCase):
+    def test_direct_linker_propagates_attention_dp_rank(self):
+        from sglang.srt.mem_cache.storage.mooncake_store.mooncake_direct_linker import (
+            _direct_linker_storage_config,
+        )
+
+        params = types.SimpleNamespace(
+            pp_rank=0, pp_size=1, attn_cp_rank=0, attn_cp_size=1
+        )
+        with (
+            patch(
+                "sglang.srt.mem_cache.storage.mooncake_store.mooncake_direct_linker.get_parallel"
+            ) as get_parallel,
+            patch(
+                "sglang.srt.mem_cache.storage.mooncake_store.mooncake_direct_linker.get_model"
+            ) as get_model,
+        ):
+            get_parallel.return_value.attn_dp_rank = 3
+            get_model.return_value.model_path = "test"
+            config = _direct_linker_storage_config(
+                params=params,
+                tp_rank=0,
+                tp_size=1,
+                rank_replicated=True,
+                extra_config={},
+            )
+
+        self.assertEqual(config.dp_rank, 3)
+
     def test_dp_attention_clients_get_distinct_directories(self):
         with tempfile.TemporaryDirectory() as base:
             paths = {

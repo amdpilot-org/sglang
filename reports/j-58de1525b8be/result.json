@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1511",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1398",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1479",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "2ffc47a4c31856746c82020ea6e55e50cc2c8709",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's per-DP/TP/PP Mooncake SSD directory layout and corrected the registered MooncakeDirectLinker path to propagate the runtime attention DP rank. Documented that Mooncake local-disk storage supports one client per final directory and that SGLang treats ssd_offload_path as a base for embedded per-rank directories.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-58de1525b8be/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py (candidate before correction)",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's three original path tests passed, confirming its valid legacy-controller DP/TP/PP isolation and unset-path boundary."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-58de1525b8be/venv/bin/python /tmp/direct_counterexample.py (candidate before correction)",
+      "exit_code": 1,
+      "what_was_measured": "Two direct-linker-shaped configs omitted DP identity, both retained dp_rank=0, and both selected the same rank_0_0_0 directory; the distinct-path assertion failed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-58de1525b8be/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Four tests passed after correction, including direct-linker propagation of attention DP rank plus DP/TP/PP path and unset-path boundaries."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-58de1525b8be/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_standalone_dummy_mamba.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "15 adjacent Mooncake unit tests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-58de1525b8be/venv/bin/python -m pre_commit run --files python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_direct_linker.py python/sglang/srt/mem_cache/storage/mooncake_store/README.md test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, safety, and test-registration checks passed."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "One AMD Instinct MI355X gfx950 GPU was visible through torch 2.11.0+rocm7.2. No GPU execution was claimed because the defect and correction are Python rank propagation and setup-path selection; GPU execution would not validate the missing identity.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights and the reported TP8 multi-rank deployment were unavailable, so no full model or distributed workload was claimed.",
+    "No live Mooncake master with simultaneous LOCAL_DISK clients was run; deterministic setup-path tests validate the SGLang collision precondition and correction, not bucket corruption or restart recovery.",
+    "The Mooncake-side recovery/ownership change referenced by the issue was outside this repository and was not qualified."
+  ]
+}
