@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37186",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1102",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1063",
+  "candidate_commit": "bbaaba6517fbc5bc7c2ff6663e50f93fc9ddf1f9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproducibly drops out-of-range visual encoder layers through the broad PP layer regex. The exact candidate restricts PP filtering to normalized model.layers.N decoder names. Its regression and independent dense/MoE loader boundary and namespace cases pass, with no counterexample found within the original contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c43f5f27e5be/venv/bin/python - <independent base loader reproduction>",
+      "exit_code": 1,
+      "what_was_measured": "On base 358c163, Qwen3_5ForConditionalGeneration.load_weights with PP range [1,3) loaded decoder layers 1 and 2 but dropped model.visual.layers.3.weight and model.visual.layers.4.weight; the assertion requiring visual layer 3 failed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c43f5f27e5be/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_pipeline_parallel.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate bbaaba6, all 7 candidate tests passed, including the actual dense conditional-generation loader regression and helper namespace cases."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-c43f5f27e5be/venv/bin/python - <independent candidate adversarial loader cases>",
+      "exit_code": 0,
+      "what_was_measured": "Both dense and MoE conditional-generation loaders excluded decoder layers outside [1,3), loaded decoder layers inside it, and retained visual layers 0, 3, and 5. Nine namespace/prefix boundary cases also matched the intended decoder-only classification."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One gfx950 AMD Instinct MI350X was visible through PyTorch/ROCm, but the defect is deterministic Python name filtering before tensor device execution. No GPU numerical claim is made."
+  },
+  "native_rebuilt": false,
+  "source_paths": [
+    "/job/repo/python/sglang/srt/models/qwen3_5.py",
+    "/job/repo/test/registered/unit/models/test_qwen3_5_pipeline_parallel.py"
+  ],
+  "native_paths": [],
+  "remaining_limitations": [
+    "No Qwen3.5 checkpoint weights were available, so a complete checkpoint load and semantic model validation were not performed.",
+    "No multi-process, multi-node, or end-to-end pipeline-parallel serving workload was run.",
+    "The prepared host is AMD gfx950/ROCm 7.2 whereas the original report recorded NVIDIA H100/CUDA; the reviewed failure and fix are device-independent pre-device Python filtering.",
+    "The minimal fixtures qualify the actual load_weights filtering contract but do not qualify full-model serving or model accuracy."
+  ]
+}
