@@ -1,0 +1,106 @@
+.F.                                                                      [100%]
+=================================== FAILURES ===================================
+_____________ test_dispatch_rechecks_completed_requests_after_lock _____________
+
+    def test_dispatch_rechecks_completed_requests_after_lock():
+        class FakeEncoder:
+            def __init__(self):
+                self.encode_dispatch_lock = asyncio.Lock()
+                self.batches = []
+
+            async def batch_encode(self, requests, _modality):
+                self.batches.append([request["req_id"] for request in requests])
+                return [(1, 2, 3, None, None) for _ in requests]
+
+        async def run_test():
+            encoder = FakeEncoder()
+            broadcasts = []
+            scheduler = EncoderScheduler(
+                encoder=encoder, send_sockets=[object()], max_batch_size=2
+            )
+            completed = PendingRequest(_request("completed"), asyncio.get_running_loop())
+            live = PendingRequest(_request("live"), asyncio.get_running_loop())
+
+            await encoder.encode_dispatch_lock.acquire()
+            with patch(
+                "sglang.srt.disaggregation.encoder.runtime.sock_send",
+                side_effect=lambda _sock, payload: broadcasts.append(payload),
+            ):
+                dispatch = asyncio.create_task(
+                    scheduler._dispatch_group([completed, live], Modality.IMAGE)
+                )
+                await asyncio.sleep(0)
+                completed.future.set_result((9, 9, 9, None, None))
+                encoder.encode_dispatch_lock.release()
+                await dispatch
+
+            assert encoder.batches == [["live"]]
+            assert len(broadcasts) == 1
+            assert await live.future == (1, 2, 3, None, None)
+
+>       asyncio.run(run_test())
+
+test/registered/unit/disaggregation/test_encoder_scheduler.py:218:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def run_test():
+        encoder = FakeEncoder()
+        broadcasts = []
+        scheduler = EncoderScheduler(
+            encoder=encoder, send_sockets=[object()], max_batch_size=2
+        )
+        completed = PendingRequest(_request("completed"), asyncio.get_running_loop())
+        live = PendingRequest(_request("live"), asyncio.get_running_loop())
+
+        await encoder.encode_dispatch_lock.acquire()
+        with patch(
+            "sglang.srt.disaggregation.encoder.runtime.sock_send",
+            side_effect=lambda _sock, payload: broadcasts.append(payload),
+        ):
+            dispatch = asyncio.create_task(
+                scheduler._dispatch_group([completed, live], Modality.IMAGE)
+            )
+            await asyncio.sleep(0)
+            completed.future.set_result((9, 9, 9, None, None))
+            encoder.encode_dispatch_lock.release()
+            await dispatch
+
+>       assert encoder.batches == [["live"]]
+E       AssertionError: assert [['completed', 'live']] == [['live']]
+E
+E         At index 0 diff: ['completed', 'live'] != ['live']
+E         Use -v to get more diff
+
+test/registered/unit/disaggregation/test_encoder_scheduler.py:214: AssertionError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+<frozen abc>:106
+  <frozen abc>:106: DeprecationWarning: MultiPlatformOp is deprecated; subclass sglang.kernels.fused_op.BaseFusedOp instead (RFC #29630).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/disaggregation/test_encoder_scheduler.py::test_dispatch_rechecks_completed_requests_after_lock
+1 failed, 2 passed, 14 deselected, 18 warnings in 26.17s
