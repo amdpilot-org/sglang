@@ -397,6 +397,11 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         self._prefill_dp_rank_queries: Dict[
             str, Tuple[Tuple[int, ...], Future[Dict[str, int]]]
         ] = {}
+        self._dp_rank_query_last_attempt_time: Dict[str, float] = {}
+        self._dp_rank_query_retry_count: Dict[str, int] = {}
+        self._dp_rank_query_base_interval: float = 0.1  # seconds
+        self._dp_rank_query_max_interval: float = 2.0  # seconds
+        self._max_dp_rank_query_retries: int = 8
         self._ensure_retry_count: Dict[str, int] = {}
         self._max_ensure_retries: int = 15  # scheduling cycles
         self._ensure_last_attempt_time: Dict[str, float] = {}
@@ -1000,6 +1005,11 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         for bootstrap_addr in set(queries) - set(addr_to_reqs):
             _, stale_future = queries.pop(bootstrap_addr)
             stale_future.cancel()
+        for bootstrap_addr in set(self._dp_rank_query_last_attempt_time) - set(
+            addr_to_reqs
+        ):
+            del self._dp_rank_query_last_attempt_time[bootstrap_addr]
+            self._dp_rank_query_retry_count.pop(bootstrap_addr, None)
 
         for bootstrap_addr, decode_reqs in addr_to_reqs.items():
             if bootstrap_addr in queries:
@@ -1014,6 +1024,8 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
             )
             if not rooms:
                 continue
+            if not self._can_query_prefill_dp_ranks(bootstrap_addr):
+                continue
 
             future = self.kv_manager._ensure_prefill_recompute_executor().submit(
                 CommonKVReceiver.query_prefill_dp_ranks,
@@ -1021,6 +1033,51 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                 list(rooms),
             )
             queries[bootstrap_addr] = (rooms, future)
+
+    def _can_query_prefill_dp_ranks(self, bootstrap_addr: str) -> bool:
+        """Apply bounded exponential backoff to unresolved room lookups."""
+        now = time.monotonic()
+        last_attempt = self._dp_rank_query_last_attempt_time.get(bootstrap_addr)
+        retry_count = self._dp_rank_query_retry_count.get(bootstrap_addr, 0)
+        retry_interval = min(
+            self._dp_rank_query_base_interval * (2**retry_count),
+            self._dp_rank_query_max_interval,
+        )
+        if (
+            last_attempt is not None
+            and now - last_attempt < retry_interval
+        ):
+            return False
+        self._dp_rank_query_last_attempt_time[bootstrap_addr] = now
+        return True
+
+    def _finish_dp_rank_query(
+        self,
+        bootstrap_addr: str,
+        unresolved: List[DecodeRequest],
+        remaining: List[DecodeRequest],
+    ) -> None:
+        if not unresolved:
+            self._dp_rank_query_retry_count.pop(bootstrap_addr, None)
+            self._dp_rank_query_last_attempt_time.pop(bootstrap_addr, None)
+            return
+
+        count = self._dp_rank_query_retry_count.get(bootstrap_addr, 0) + 1
+        self._dp_rank_query_retry_count[bootstrap_addr] = count
+        if count < self._max_dp_rank_query_retries:
+            remaining.extend(unresolved)
+            return
+
+        error_msg = (
+            f"Could not resolve prefill DP ranks from {bootstrap_addr} "
+            f"after {count} attempts"
+        )
+        logger.error(error_msg)
+        for decode_req in unresolved:
+            if decode_req.kv_receiver is not None:
+                decode_req.kv_receiver.abort()
+        self._dp_rank_query_retry_count.pop(bootstrap_addr, None)
+        self._dp_rank_query_last_attempt_time.pop(bootstrap_addr, None)
 
     def _cancel_prefill_dp_rank_queries(self) -> None:
         for _, future in self._prefill_dp_rank_queries.values():
@@ -1062,19 +1119,16 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                     and tuple(rooms[: len(prefetched_rooms)]) == prefetched_rooms
                 ):
                     room_to_rank = prefetched[1].result()
-                    remaining_rooms = rooms[len(prefetched_rooms) :]
-                    if remaining_rooms:
-                        room_to_rank.update(
-                            CommonKVReceiver.query_prefill_dp_ranks(
-                                bootstrap_addr, remaining_rooms
-                            )
-                        )
                 else:
                     if prefetched is not None:
                         prefetched[1].cancel()
+                    if not self._can_query_prefill_dp_ranks(bootstrap_addr):
+                        remaining.extend(need_query)
+                        continue
                     room_to_rank = CommonKVReceiver.query_prefill_dp_ranks(
                         bootstrap_addr, rooms
                     )
+                unresolved = []
                 for decode_req in need_query:
                     prefill_dp_rank = room_to_rank.get(
                         str(decode_req.req.bootstrap_room)
@@ -1082,7 +1136,10 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
                     if prefill_dp_rank is not None:
                         resolved.append((decode_req, int(prefill_dp_rank)))
                     else:
-                        remaining.append(decode_req)
+                        unresolved.append(decode_req)
+                self._finish_dp_rank_query(
+                    bootstrap_addr, unresolved, remaining
+                )
             else:
                 prefetched = self._prefill_dp_rank_queries.pop(bootstrap_addr, None)
                 if prefetched is not None:
