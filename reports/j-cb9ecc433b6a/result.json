@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38981",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/877",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/832",
+  "candidate_commit": "0622ecefe18513f109ee381dd2974c9d0d6d50ae",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate coalesces touching abort ranges and fixes the original shared-boundary assertion, and it fixes the previously reported plain A/B/A allocator-state counterexample. Its request-scoped idempotency fingerprint is still unstable because it includes the version counter shared by every view of ReqToTokenPool.req_to_token: an unrelated row write invalidates A's completed record, so retry A frees A's pages again.",
+  "tests": [
+    {
+      "command": "git switch amdpilot/j-cb9ecc433b6a && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb9ecc433b6a/venv/bin/python /job/review-evidence-j-cb9ecc433b6a/allocator_probe.py original",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base 358c163, actual free_kv_row_segments reached allocator._page_disjoint and reproduced the original shared-page assertion at touching position 5."
+    },
+    {
+      "command": "git switch --detach 0622ecefe18513f109ee381dd2974c9d0d6d50ae && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb9ecc433b6a/venv/bin/python /job/review-evidence-j-cb9ecc433b6a/allocator_probe.py original",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate freed the two unique pages for touching ranges [0,5) and [5,7) without asserting."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb9ecc433b6a/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_paged_free_segment.py test/registered/unit/mem_cache/test_swa_unittest.py test/registered/unit/mem_cache/test_unified_swa_shared_virtual_ids.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression suite: 55 tests and 41 subtests passed, including touching hybrid-SWA ranges and plain interleaved A/B/A retry."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb9ecc433b6a/venv/bin/python /job/review-evidence-j-cb9ecc433b6a/adversarial_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "On cuda:0 backed by AMD ROCm, independent cases passed for three touching pieces plus a disjoint gap, distinct request-local histories, and not memoizing a failed call."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-cb9ecc433b6a/venv/bin/python /job/review-evidence-j-cb9ecc433b6a/shared_table_version_probe.py",
+      "exit_code": 1,
+      "what_was_measured": "On cuda:0 backed by AMD ROCm, actual shared-tensor views produced page deltas (2,2), not idempotent (2,0), when row B was written between first cleanup and identical retry of row A."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Allocator probes executed with device cuda:0 under torch 2.11.0+rocm7.2 on the assigned AMD GPU; the remaining shared-table-version counterexample reproduced there with deltas (2,2).",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Free row A through views of the shared req_to_token tensor, write any unrelated row B, then retry the identical A ranges. Because the candidate fingerprints the shared tensor _version, retry A misses its completed record and inserts A's two physical pages into free_pages again (observed deltas (2,2), expected (2,0))."
+  ],
+  "remaining_limitations": [
+    "The prepared environment has one AMD Instinct GPU with ROCm 7.2 rather than eight NVIDIA B300 GPUs (SM103), and Kimi-K3/DSpark weights are unavailable, so the full TP8/DCP8 multi-rank serving abort replay remains unverified.",
+    "No native source changed; repository-environment.json reports native=null and wheel=null, so no native rebuild was applicable. Candidate Python imports were confirmed from /job/repo/python."
+  ]
+}
