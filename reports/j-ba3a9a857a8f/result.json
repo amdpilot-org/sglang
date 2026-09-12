@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32204",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Reproduced Qwen3.5 DFlash terminal capture position indexing past the decoder ModuleList, then added explicit support for the terminal pre-final-norm capture position and validation for positions beyond it. Qwen3-VL's existing HF-to-SGLang +1 mapping now accepts the last decoder layer and returns its residual-stream output.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ba3a9a857a8f/venv/bin/python minimal Qwen3.5 backbone reproduction at the recorded base",
+      "exit_code": 1,
+      "what_was_measured": "A three-layer Qwen3.5 backbone given shifted capture position 3 raised IndexError: index 3 is out of range. Raw output: reports/j-ba3a9a857a8f/raw/exact_base_reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba3a9a857a8f/venv/bin/python -m pytest -q test/registered/unit/models/test_qwen3_5_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused cases passed: Qwen3-VL +1 mapping, terminal position acceptance, one-past-terminal rejection, residual-stream numerical capture, and the residual-free boundary. Raw output: reports/j-ba3a9a857a8f/raw/passing_after.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ba3a9a857a8f/venv/bin/python GPU terminal-capture numerical check",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X gfx950, terminal capture produced [[2.0, 0.5, 2.5]], exactly matching an independently computed CPU hidden+residual reference. Raw output: reports/j-ba3a9a857a8f/raw/gpu_boundary_check.log"
+    },
+    {
+      "command": "git diff --check && /tmp/amdpilot-repo-j-ba3a9a857a8f/venv/bin/python -m py_compile python/sglang/srt/models/qwen3_5.py test/registered/unit/models/test_qwen3_5_dflash_capture.py",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace and Python syntax validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Single assigned AMD Instinct MI350X, gfx950:sramecc+:xnack-, ran the terminal residual-stream addition and matched the CPU reference exactly; see reports/j-ba3a9a857a8f/raw/gpu_boundary_check.log."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Qwen3.5-4B weights and the reported Ascend environment were not available, so no full server startup or model execution was claimed.",
+    "The GPU check validates the device-independent terminal capture computation only, not Qwen3.5 semantic accuracy or a distributed workload.",
+    "This narrow change covers the reported Qwen3.5/Qwen3-VL crash path; the separate silent terminal-capture behavior in Qwen2/Qwen3 was not changed."
+  ]
+}
