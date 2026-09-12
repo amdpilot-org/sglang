@@ -1,0 +1,54 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32928",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2816",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2789",
+  "candidate_commit": "93773a6d3a67ed79e50d198c20f9964be234832e",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "prepared_checkout_difference": "none; the prepared amdpilot/j-b47ffc385754 branch was exactly at the recorded base commit",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The base reproduces the missing NCCL RAS integration and the candidate adds the requested collector, detector, scheduler lifecycle, metrics, logs, documentation, and focused tests. However, its socket client hard-codes a one-second read timeout. NVIDIA's NCCL RAS documentation states that STATUS may take several seconds while gathering job-wide communicator data, especially for large or unhealthy jobs. An independent protocol-compatible server returning valid JSON after 1.2 seconds was misclassified as a failed poll. This can produce false poll_success=0 crash signals in the exact degraded multi-node conditions the feature is intended to diagnose. The candidate tests pass because their socket mock responds immediately and do not cover a realistically delayed STATUS response. Live NVIDIA NCCL RAS behavior remains unavailable on this AMD/RCCL single-GPU node.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b47ffc385754/venv/bin/python -c 'import sglang.srt.distributed.nccl_ras' (at recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: the collector module does not exist at the recorded base. Evidence: reports/j-b47ffc385754/raw/base-import-failure.log"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b47ffc385754/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 34 tests and 2 subtests passed using the checked-out source module. Evidence: reports/j-b47ffc385754/raw/candidate-unit.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-b47ffc385754/venv/bin/python /job/review-evidence-j-b47ffc385754/adversarial_protocol.py (at candidate commit)",
+      "exit_code": 1,
+      "what_was_measured": "Independent protocol-compatible delayed STATUS case. The server accepted the candidate's SET FORMAT json and STATUS commands, then returned a valid response after 1.2 seconds. The candidate's one-second read timeout returned None and misclassified the valid response as poll failure. Evidence: reports/j-b47ffc385754/raw/adversarial-protocol.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b47ffc385754/venv/bin/python -m compileall -q python/sglang/srt/distributed/nccl_ras.py python/sglang/srt/managers/scheduler.py python/sglang/srt/observability/metrics_collector.py (at candidate commit)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Python source compiled under the pinned interpreter and imported from /job/repo/python. No native source changed."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 93773a6d3a67ed79e50d198c20f9964be234832e --check",
+      "exit_code": 2,
+      "what_was_measured": "The exact candidate contains trailing whitespace in its retained unit-test log. This is minor and not the reason for request_changes. Evidence: reports/j-b47ffc385754/raw/environment-and-static.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The prepared runtime identified one AMD Instinct MI355X, Torch 2.11.0+rocm7.2, RCCL/NCCL compatibility API 2.27.7, and no listener on localhost:28028. This establishes the architecture blocker but is not live NCCL RAS execution. Evidence: reports/j-b47ffc385754/raw/environment-and-static.log",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A valid NCCL RAS STATUS response taking 1.2 seconds is reported as poll failure because RasSocketClient.read_timeout defaults to 1.0 second; NCCL documents that job-wide STATUS responses may take several seconds.",
+    "The candidate's immediate-response socket mock does not exercise delayed or degraded job-wide collection, so its passing regression suite does not establish the original runtime contract.",
+    "Live NVIDIA NCCL 2.28.7+ polling, two-node unresponsive/dead transitions, and TP=2 serving metrics remain unverified on the available AMD/RCCL 2.27.7 single-GPU environment."
+  ],
+  "remaining_limitations": [
+    "Only one AMD Instinct MI355X was assigned; the required NVIDIA NCCL 2.28.7+ RAS endpoint and a second node/GPU were unavailable.",
+    "RCCL reports NCCL API compatibility version 2.27.7 and localhost:28028 refused connections, so no live RAS STATUS or crash-transition experiment was possible.",
+    "The deterministic tiny Llama serving fixture cannot substitute for NVIDIA NCCL RAS, multi-node failure detection, or semantic validation of this collector and was therefore not used as proof.",
+    "No C++ or other native source changed, repository-environment.json provides no native rebuild target, and no native rebuild was required.",
+    "Symmetric whole-collective hangs are intentionally outside this collector's divergence signal and remain assigned to the forward watchdog by the original contract."
+  ]
+}

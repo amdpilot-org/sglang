@@ -1,0 +1,162 @@
+
+The RAS threads also listen for client connections on ``localhost``, port ``28028`` (these defaults can be changed using
+:ref:`env_NCCL_RAS_ADDR`).  The ``ncclras`` binary client can be used to connect to that socket and query the RAS
+subsystem for the current job status, which is then printed to standard output.  The client accepts the ``-h`` and
+``-p`` arguments to specify the host name and port, ``-v`` to produce a more verbose output in case of problems, and
+``-t`` to specify a different timeout (``5`` seconds by default; `0` disables the timeout).
+
+As the client communication protocol is fully text-based, standard networking tools such as telnet or netcat can be used
+instead of the ``ncclras`` binary.  The relevant commands include ``STATUS``, ``VERBOSE STATUS`` (equivalent to the
+``ncclras`` client's ``-v`` argument), and ``TIMEOUT <seconds>`` (equivalent to ``-t``); e.g., ``echo verbose status |
+nc localhost 28028``.
+
+Irrespective of how the query is submitted, the receiving RAS thread sends back the job summary information as well as
+the summary information about all the NCCL communicators; the latter is collected from all the job's processes so, for
+jobs experiencing problems or ones that are particularly large, the response may take several seconds to generate.  In
+case any issues were encountered, additional information is provided.
+
+Sample Output
+-------------
+
+This section contains excerpts of the RAS status output.  Please note that the exact format and scope of the information
+being made available varies from release to release; the excerpts are provided for illustrative purposes only.  For a
+more machine-friendly format, see :ref:`ras_json` below.
+
+Here's an example output from a job that is progressing normally:
+
+.. code::
+
+  Job summary
+  ===========
+
+    Nodes  Processes         GPUs  Processes     GPUs
+  (total)   per node  per process    (total)  (total)
+        4          8            1         32       32
+
+We've got a job consisting of 32 GPUs (1 GPU per process) running on 4 nodes.
+
+.. code::
+
+  Communicators... (0.00s)
+  =============
+
+  Group     Comms     Nodes     Ranks     Ranks     Ranks    Status  Errors
+      #  in group  per comm  per node  per comm  in group
+      0         8         4         1         4        32   RUNNING      OK
+
+The GPUs are split into 8 communicators, 1 GPU per node.  RAS attempts to make the summary output as short as possible
+by grouping together objects having the same size and other important properties.
+
+For jobs that are actively communicating during the RAS query, the following output can sometimes be observed:
+
+
+.. code::
+
+  {
+    "nccl_version": "2.29.1",
+    "cuda_runtime_version": 13000,
+    "cuda_driver_version": 13000,
+    "timestamp": "2025-12-19 13:06:53",
+    "communicators_count": 1,
+    "communicators": [
+      {
+        "hash": "0xae94423cfbb2ef4a",
+        "secondary_hash": "0xb7e7187447156001:0xb8242ed28a71381e",
+        "size": 2,
+        "ranks_count": 1,
+        "missing_ranks_count": 1,
+        "ranks": [
+          {
+            "rank": 0,
+            "host": "172.16.64.245",
+            "pid": 1524344,
+            "cuda_dev": 0,
+            "nvml_dev": 0,
+            "status": {
+              "init_state": 0,
+              "async_error": 0,
+              "finalize_called": false,
+              "destroy_flag": false,
+              "abort_flag": false
+            },
+            "collective_counts": {
+              "Broadcast": 0,
+              "Reduce": 0,
+              "AllGather": 0,
+              "ReduceScatter": 0,
+              "AllReduce": 0
+            }
+          }
+        ],
+        "missing_ranks": [
+          {
+            "rank": 1,
+            "host": "172.16.64.245",
+            "pid": 1524345,
+            "cuda_dev": 1,
+            "nvml_dev": 1,
+            "status": {
+              "unresponsive": true,
+              "considered_dead": false
+            }
+          }
+        ]
+      }
+    ],
+    "ras": {
+      "collection_time_sec": 0.000,
+      "timeouts_count": 0
+    }
+  }
+
+As can be observed, the JSON output is considerably more verbose than the text one (which is optimized for human
+consumption).  It is essentially a dump of all raw data collected by RAS; the analysis and interpretation is left to the
+consumer.
+
+Most of the fields should be fairly self-explanatory, with the possible exception of:
+
+* ``secondary_hash``: can be used in conjunction with ``hash`` to create a communicator identifier that is guaranteed to
+  be unique (which ``hash`` by itself is not, although in practice collisions are highly unlikely).
+* ``nvml_dev``: normally the same as ``cuda_dev``, unless `CUDA_VISIBLE_DEVICES` is being used (in which case
+  ``cuda_dev`` may not be unique among ranks on a single node, whereas ``nvml_dev`` always is).
+* ``init_state``: ``0`` (`ncclSuccess`) if a rank is fully initialized, ``7`` (`ncclInProgress`) if initialization is
+  still ongoing; any other value indicates an error.
+* ``async_error``: the value that would be returned if the rank called `ncclGetAsyncError`.
+* ``unresponsive``: `true` if RAS was unable to reach the rank when collecting data -- this is the most common
+  reason why a rank would be considered missing.  There are, however, corner cases during communicator initialization
+  and termination when a process may be reachable but does not consider itself to be a member of a given communicator.
+
+Monitoring Mode
+---------------
+
+Starting with NCCL 2.29, RAS adds a monitoring mode for real-time status updates.
+
+The ``ncclras`` binary gains an additional option ``-m`` that switches it to monitoring mode.  The equivalent wire-level
+protocol command is ``MONITOR``.
+
+When in monitoring mode, the RAS client prints a welcome message and does not terminate until it is interrupted or the
+job finishes:
+
+.. code::
+
+  RAS Monitor Mode - watching for peer changes (Ctrl+C to exit)...
+  ================================================================
+
+A sample event of interest could be a process being declared dead:
+
+.. code::
+
+   [2025-12-19 13:07:07] PEER_DEAD: Process 1524345 on node 172.16.64.245 managing GPU 1
+
+Monitoring mode can also be used in conjunction with JSON output:
+
+.. code::
+
+  {
+    "timestamp": "2025-12-19 13:07:07",
+    "group": "LIFECYCLE",
+    "event": "PEER_DEAD",
+    "peer": {
+      "host": "172.16.64.245",
+      "pid": 1524345,
+      "cuda_devs": [1],
