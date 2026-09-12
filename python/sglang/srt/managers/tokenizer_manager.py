@@ -1770,6 +1770,32 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             finished = state.finished
             state.event.clear()
 
+            # abort_request() marks the tokenizer-side state before the scheduler
+            # can acknowledge the abort. Treat that mark as the client-visible
+            # cancellation boundary: output that was queued but not yet yielded
+            # must not escape while the abort is in flight.
+            if is_stream and state.abort_sent:
+                if not finished:
+                    continue
+
+                terminal_out = out_list[-1]
+                finish_reason = terminal_out.get("meta_info", {}).get(
+                    "finish_reason"
+                )
+                if isinstance(finish_reason, dict) and finish_reason.get(
+                    "type"
+                ) == "abort":
+                    # The scheduler's abort echo can contain text/tokens already
+                    # accumulated by the tokenizer. The terminal event is control
+                    # information only; do not turn that buffered content into a
+                    # post-cancellation stream chunk.
+                    terminal_out = dict(terminal_out)
+                    if "text" in terminal_out:
+                        terminal_out["text"] = ""
+                    if "output_ids" in terminal_out:
+                        terminal_out["output_ids"] = []
+                    out_list = [terminal_out]
+
             # With incremental streaming, each chunk is a delta — coalesce
             # multiple queued chunks to avoid dropping token ids.
             incremental_stream = is_stream and self.incremental_streaming_output

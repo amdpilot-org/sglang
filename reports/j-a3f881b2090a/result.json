@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34111",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Made tokenizer-side cancellation the streaming visibility boundary: queued nonterminal chunks are dropped after abort dispatch, and the terminal abort event cannot expose accumulated text or token IDs.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-a3f881b2090a/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -k StreamAbortBoundary (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The queued post-cancellation chunk was yielded immediately; the regression expected it to remain blocked until the abort acknowledgement."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a3f881b2090a/venv/bin/python -m pytest -q test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "29 tokenizer-manager unit tests and 3 subtests passed, including cancelled non-incremental streaming, incremental coalescing, and the uncancelled-stream boundary."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a3f881b2090a/venv/bin/python reports/j-a3f881b2090a/run_tiny_abort_probe.py --fixture /tmp/amdpilot-repo-j-a3f881b2090a/tiny-random-llama --output reports/j-a3f881b2090a/evidence/before",
+      "exit_code": 0,
+      "what_was_measured": "On the unmodified source, the real gfx950 server returned a post-cancel abort event for grammar_primary with output_ids [0]; the overlap peer continued."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-a3f881b2090a/venv/bin/python reports/j-a3f881b2090a/run_tiny_abort_probe.py --fixture /tmp/amdpilot-repo-j-a3f881b2090a/tiny-random-llama --output reports/j-a3f881b2090a/evidence/fixed",
+      "exit_code": 0,
+      "what_was_measured": "With the fix, the real gfx950 server returned only an empty-text, empty-output_ids abort event for grammar_primary; the overlap peer continued."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-a3f881b2090a/venv/bin/python -m compileall -q python/sglang/srt/managers/tokenizer_manager.py reports/j-a3f881b2090a/run_tiny_abort_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed production and evidence scripts compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One assigned AMD Instinct MI350X gfx950 ran the source-checkout SGLang server twice. Raw commands, server logs, request events, and process cleanup metadata are under reports/j-a3f881b2090a/evidence/."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The source report's meta-llama/Llama-3.2-1B-Instruct weights were unavailable.",
+    "The qualified tiny fixture lacks JSON punctuation, so XGrammar reported Accepted tokens: [] and token 0 decoded to empty text. The GPU run proves post-cancel token-ID visibility and its removal, not model semantic accuracy or the exact visible invalid string.",
+    "The reported dual RTX 4090 CUDA environment was not available; testing used one assigned gfx950 GPU and does not claim a multi-GPU reproduction."
+  ]
+}
