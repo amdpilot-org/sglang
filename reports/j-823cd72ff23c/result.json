@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36395",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b663c98b8df05af0b927a19e1cb0c40d33ce8bab",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "summary": "The recorded base reproduces the missing MoE initialization in correctness-mode and direct load_model paths. The exact candidate moves initialization to the shared load boundary before ModelConfig/ModelRunner and passes both its regression and independent exact-backend/boundary cases. This fully resolves the source-level initialization contract; original NVIDIA model/kernel execution was unavailable.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-823cd72ff23c/venv/bin/python -m pytest -q /job/review-evidence-j-823cd72ff23c/test_one_batch_moe_config.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Candidate regression against recorded base: correctness mode observed auto instead of explicit aiter; 1 failed, 2 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-823cd72ff23c/venv/bin/python -m pytest -q test/registered/unit/benchmark/test_one_batch_moe_config.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate regression: explicit backend in correctness and latency modes plus auto boundary; 3 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-823cd72ff23c/venv/bin/python -m pytest -q /job/review-evidence-j-823cd72ff23c/adversarial_moe_config.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Independent suite on base: exact flashinfer_mxfp4, direct-load, correctness, and republish cases failed; 4 failed, 1 passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-823cd72ff23c/venv/bin/python -m pytest -q /job/review-evidence-j-823cd72ff23c/adversarial_moe_config.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent suite on exact candidate: flashinfer_mxfp4, aiter, auto, direct load, correctness, and republish behavior; 5 passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-823cd72ff23c/venv/bin/python -m py_compile python/sglang/benchmark/one_batch.py test/registered/unit/benchmark/test_one_batch_moe_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "GPU inventory only: assigned device is AMD Instinct MI355X gfx950. Tests intentionally stop before model/GPU construction; no Kimi-K3 weights or NVIDIA GB300/SM103 were available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No NVIDIA GB300/SM103 was available, so trtllm-gen versus Triton kernel provenance was not executed.",
+    "Kimi-K3 MXFP4 weights were unavailable, so checkpoint loading, BF16 materialization behavior, and semantic output were not measured.",
+    "No full-model or distributed workload was run.",
+    "No native rebuild was needed because the candidate changes only Python and report/test files."
+  ]
+}
