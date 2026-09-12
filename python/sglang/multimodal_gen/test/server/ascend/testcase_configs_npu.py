@@ -8,6 +8,14 @@ from sglang.multimodal_gen.test.server.testcase_configs import (
     T2I_sampling_params,
     TI2V_sampling_params,
 )
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_FLUX_1_DEV_MODEL_NAME_FOR_TEST,
+    DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST,
+    DEFAULT_FLUX_2_KLEIN_4B_MODEL_NAME_FOR_TEST,
+    DEFAULT_LTX_2_MODEL_NAME_FOR_TEST,
+    DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST,
+    DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
+)
 
 MODELSCOPE_MODEL_WEIGHTS_DIR = "/root/.cache/modelscope/hub/models/"
 
@@ -18,19 +26,21 @@ def use_modelscope(name: str):
 
 COSMOS3_NANO_WEIGHTS_PATH = use_modelscope("nv-community/Cosmos3-Nano")
 ERNIE_IMAGE_WEIGHTS_PATH = use_modelscope("PaddlePaddle/ERNIE-Image")
-FLUX_1_DEV_WEIGHTS_PATH = use_modelscope("black-forest-labs/FLUX.1-dev")
-FLUX_2_DEV_WEIGHTS_PATH = use_modelscope("black-forest-labs/FLUX.2-dev")
-FLUX_2_KLEIN_4B_WEIGHTS_PATH = use_modelscope("black-forest-labs/FLUX.2-klein-4B")
+FLUX_1_DEV_WEIGHTS_PATH = use_modelscope(DEFAULT_FLUX_1_DEV_MODEL_NAME_FOR_TEST)
+FLUX_2_DEV_WEIGHTS_PATH = use_modelscope(DEFAULT_FLUX_2_DEV_MODEL_NAME_FOR_TEST)
+FLUX_2_KLEIN_4B_WEIGHTS_PATH = use_modelscope(
+    DEFAULT_FLUX_2_KLEIN_4B_MODEL_NAME_FOR_TEST
+)
 GLM_IMAGE_WEIGHTS_PATH = use_modelscope("ZhipuAI/GLM-Image")
 JOYAI_IMAGE_EDIT_WEIGHTS_PATH = use_modelscope(
     "jd-opensource/JoyAI-Image-Edit-Diffusers"
 )
-LTX_2_WEIGHTS_PATH = use_modelscope("Lightricks/LTX-2")
+LTX_2_WEIGHTS_PATH = use_modelscope(DEFAULT_LTX_2_MODEL_NAME_FOR_TEST)
 MOVA_360_WEIGHTS_PATH = use_modelscope("openmoss/MOVA-360p")
 MINIMAX_H3_WEIGHTS_PATH = use_modelscope("MiniMax/MiniMax-H3")
-QWEN_IMAGE_WEIGHTS_PATH = use_modelscope("Qwen/Qwen-Image")
+QWEN_IMAGE_WEIGHTS_PATH = use_modelscope(DEFAULT_QWEN_IMAGE_MODEL_NAME_FOR_TEST)
 WAN2_1_T2V_1_3B_DIFFUSERS_WEIGHTS_PATH = use_modelscope(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST
 )
 WAN2_2_T2V_A14B_DIFFUSERS_W8A8_WEIGHTS_PATH = use_modelscope(
     "Eco-Tech/Wan2.2-T2V-A14B-Diffusers-w8a8"

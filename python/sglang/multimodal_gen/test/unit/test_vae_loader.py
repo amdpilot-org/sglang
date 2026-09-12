@@ -46,6 +46,7 @@ from sglang.multimodal_gen.runtime.models.vaes import wanvae
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.ltx_2.decoding_av import (
     LTX2AVDecodingStage,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST
 from sglang.test.test_utils import CustomTestCase
 
 
@@ -97,7 +98,7 @@ class TestDeploymentBytesRoot(unittest.TestCase):
                 "the parent of a component dir sums every sibling's shards",
             )
             self.assertEqual(
-                checkpoint_bytes("MiniMaxAI/MiniMax-H3"),
+                checkpoint_bytes(DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST),
                 0,
                 "a repo id globs nothing -- which is why the gate must never "
                 "be fed one",

@@ -14,6 +14,7 @@ from sglang.multimodal_gen.runtime.entrypoints.openai.utils import (
     _validate_positive_int,
     build_sampling_params,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_AR_MODEL_NAME_FOR_TEST
 
 
 def test_save_upload_to_path_accepts_starlette_upload_file(tmp_path):
@@ -64,7 +65,7 @@ def test_validate_positive_int_rejects_non_positive_sampling_fields():
 
 
 def test_build_sampling_params_resolves_size_and_explicit_dimensions(monkeypatch):
-    server_args = SimpleNamespace(model_path="zai-org/GLM-Image")
+    server_args = SimpleNamespace(model_path=DEFAULT_AR_MODEL_NAME_FOR_TEST)
     monkeypatch.setattr(openai_utils, "get_global_server_args", lambda: server_args)
     captured = {}
 

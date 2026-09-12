@@ -14,6 +14,7 @@ from sglang.multimodal_gen.configs.sample.sampling_params import DataType
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.request_validation import (
     minimax_h3_validate_canonical_request,
 )
+from sglang.multimodal_gen.test.test_utils import DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST
 
 
 def _h3_kwargs(**overrides):
@@ -140,7 +141,7 @@ def _video_request():
 
 
 def test_h3_generation_runs_video_lifecycle_and_preserves_audio():
-    server_args = SimpleNamespace(model_path="MiniMaxAI/MiniMax-H3")
+    server_args = SimpleNamespace(model_path=DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST)
     sampling_params = Mock()
     request = _video_request()
     result = SimpleNamespace(
@@ -182,7 +183,7 @@ def test_h3_generation_runs_video_lifecycle_and_preserves_audio():
 
 
 def test_h3_generation_cleans_up_after_scheduler_error():
-    server_args = SimpleNamespace(model_path="MiniMaxAI/MiniMax-H3")
+    server_args = SimpleNamespace(model_path=DEFAULT_MINIMAX_H3_MODEL_NAME_FOR_TEST)
     sampling_params = Mock()
     request = _video_request()
 
