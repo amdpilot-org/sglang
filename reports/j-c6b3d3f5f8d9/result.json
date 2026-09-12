@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Preserved candidate c1723a1's experimental SageAttention integration and valid SM100 rejection. Reproduced the pinned dependency's missing comma, but not the review's claimed SM120 source-install rejection: SUPPORTED_ARCHS has no read sites, while setup.py and the public dispatcher contain explicit SM120 branches. Added documentation that SM120 remains hardware-unvalidated rather than speculatively rejecting it.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c6b3d3f5f8d9/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_server_args.py -k 'sage or SageAttentionAdmission'",
+      "exit_code": 0,
+      "what_was_measured": "Ten focused adapter, input-rejection, ROCm/SM100 fail-closed, and server-argument admission regressions passed. The GPU numerical cases used an injected PyTorch SDPA callable, not SageAttention."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c6b3d3f5f8d9/venv/bin/python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_resolution_is_reproducible.py",
+      "exit_code": 0,
+      "what_was_measured": "Eighteen tests and eighteen resolution-reproducibility subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c6b3d3f5f8d9/venv/bin/python AST audit of /tmp/amdpilot-repo-j-c6b3d3f5f8d9/SageAttention/setup.py at d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4",
+      "exit_code": 0,
+      "what_was_measured": "The malformed set evaluates to include 10.012.0, but SUPPORTED_ARCHS has one assignment and zero load sites. Separate active SM120 setup and dispatcher branches were present."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-c6b3d3f5f8d9/venv/bin/python import/environment probe",
+      "exit_code": 0,
+      "what_was_measured": "Torch 2.11.0+rocm7.2 used AMD Instinct MI355X; importing sageattention raised ModuleNotFoundError."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "The focused parametrized FP16/BF16 adapter tests ran on the assigned AMD Instinct MI355X. They executed PyTorch SDPA only; no SageAttention CUDA kernel ran.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No supported NVIDIA architecture or CUDA toolkit was available, so pinned SageAttention was not built or imported and no INT8 Q/K kernel executed.",
+    "The numerical adapter tests substitute full-precision PyTorch SDPA and do not establish quantized SageAttention accuracy.",
+    "No end-to-end serving, model-quality, long-context, throughput, latency, or memory result establishes the approximately 2x motivation.",
+    "Dense paged-KV gathering and materialized GQA/MQA expansion remain unbenchmarked and may offset kernel gains, especially for decode.",
+    "The pinned dependency's dead SUPPORTED_ARCHS declaration contains a missing comma. Because that declaration has no read sites, this investigation did not convert it into an unsupported-SM120 policy; an actual SM120 native build and execution remain unverified."
+  ]
+}
