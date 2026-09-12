@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1715",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "2918c05acbb1fef5f01d26b563dec70649a76ff9",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds and mock-tests shared-prefix cascade for profitable eager ordinary-decode batches, but explicitly excludes CUDA-graph replay and several production modes. Its real FlashInfer integration is skipped on the prepared AMD ROCm host, so production wrapper, merge-kernel, NVIDIA serving correctness, and performance claims remain unverified.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9144d3435c57/venv/bin/python -m pytest -q /job/review-evidence-j-9144d3435c57/test_flashinfer_cascade_attention.py (on base)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: 11 failed, 2 passed, 1 skipped because the base lacks cascade selection, metadata, updater, and forward behavior."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9144d3435c57/venv/bin/python -m pytest -q test/registered/unit/test_flashinfer_cascade_attention.py (on exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused regression: 6 passed, 1 skipped, 7 subtests passed. The GPU float64 merge identity ran; the real FlashInfer integration test skipped."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9144d3435c57/venv/bin/python /job/review-evidence-j-9144d3435c57/adversarial_review.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent confirmation that graph replay uses ordinary decode, excluded modes remain excluded, prefix boundary behavior, and an identical-request batch produces zero-length unique KV segments."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 2918c05acbb1fef5f01d26b563dec70649a76ff9",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validity."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI355X was used. Torch 2.11.0+rocm7.2 reported HIP 7.2.26015 and torch.version.cuda=None. The portable float64 numerical identity ran on GPU; no NVIDIA FlashInfer kernel executed."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "CUDA-graph decode always updates and replays the existing ordinary decode wrappers; cascade is eager-only.",
+    "Sliding-window attention, encoder-decoder cross attention, speculative decode, and dequant-workspace KV caches do not use cascade.",
+    "A profitable all-identical batch invokes the unique FlashInfer wrapper with one zero-length KV segment per request; real-kernel behavior is unverified.",
+    "Actual BatchPrefillWithPagedKVCacheWrapper.forward_return_lse and production merge-state kernel execution is unverified because the integration test skipped.",
+    "No NVIDIA serving benchmark or end-to-end shared-prefix request workload verifies serving correctness or latency/throughput benefit."
+  ],
+  "remaining_limitations": [
+    "The prepared architecture is AMD ROCm rather than NVIDIA CUDA.",
+    "FlashInfer is not installed and torch.version.cuda is null.",
+    "The deterministic tiny Llama fixture cannot exercise the CUDA-only FlashInfer backend and would not qualify this feature.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
