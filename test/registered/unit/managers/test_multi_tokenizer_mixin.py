@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from unittest.mock import Mock
 
 from sglang.srt.utils.weight_versions import WeightVersionSpan
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -6,7 +8,12 @@ from sglang.test.test_utils import maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()
 
-from sglang.srt.managers.io_struct import BatchStrOutput
+from sglang.srt.managers.io_struct import (
+    BatchStrOutput,
+    ContinueGenerationReqInput,
+    PauseContinueBroadcastReq,
+    PauseGenerationReqInput,
+)
 from sglang.srt.managers.multi_tokenizer_mixin import (
     TokenizerWorker,
     _handle_output_by_index,
@@ -137,6 +144,84 @@ class TestMultiTokenizerMixin(unittest.TestCase):
     def test_get_tokenizer_worker_class_rejects_non_worker(self):
         with self.assertRaisesRegex(TypeError, "TokenizerWorker"):
             get_tokenizer_worker_class(InvalidServerArgs())
+
+
+class TestPauseContinueWaiters(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.worker = TokenizerWorker.__new__(TokenizerWorker)
+        self.worker.is_pause = False
+        self.worker.is_pause_cond = asyncio.Condition()
+        self.worker.model_update_lock = Mock()
+        self.dispatched = []
+        self.worker._dispatch_to_scheduler = self.dispatched.append
+        self.worker._pause_continue_futures = {}
+
+    async def _start_concurrent_operations(self):
+        pause_task = asyncio.create_task(
+            self.worker.pause_generation(PauseGenerationReqInput(mode="retract"))
+        )
+        continue_task = asyncio.create_task(
+            self.worker.continue_generation(ContinueGenerationReqInput())
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(len(self.dispatched), 2)
+        return pause_task, continue_task
+
+    async def test_concurrent_reverse_broadcasts_resolve_matching_waiters(self):
+        pause_task, continue_task = await self._start_concurrent_operations()
+        pause_req, continue_req = self.dispatched
+
+        await self.worker._apply_pause_continue_broadcast(
+            PauseContinueBroadcastReq(
+                is_pause=False, operation_id=continue_req.operation_id
+            )
+        )
+        await asyncio.sleep(0)
+        self.assertTrue(continue_task.done())
+        self.assertFalse(pause_task.done())
+
+        await self.worker._apply_pause_continue_broadcast(
+            PauseContinueBroadcastReq(is_pause=True, operation_id=pause_req.operation_id)
+        )
+        await asyncio.wait_for(asyncio.gather(pause_task, continue_task), timeout=1)
+        self.assertTrue(self.worker.is_pause)
+        self.assertEqual(self.worker._pause_continue_futures, {})
+
+    async def test_cancelled_operation_removes_its_waiter(self):
+        task = asyncio.create_task(
+            self.worker.continue_generation(ContinueGenerationReqInput())
+        )
+        await asyncio.sleep(0)
+        operation_id = self.dispatched[0].operation_id
+
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertNotIn(operation_id, self.worker._pause_continue_futures)
+        await self.worker._apply_pause_continue_broadcast(
+            PauseContinueBroadcastReq(is_pause=True, operation_id=operation_id)
+        )
+        self.assertTrue(self.worker.is_pause)
+        self.assertEqual(self.worker._pause_continue_futures, {})
+
+    async def test_dispatch_failure_removes_its_waiter(self):
+        def fail_dispatch(_obj):
+            raise RuntimeError("dispatch failed")
+
+        self.worker._dispatch_to_scheduler = fail_dispatch
+        with self.assertRaisesRegex(RuntimeError, "dispatch failed"):
+            await self.worker.pause_generation(PauseGenerationReqInput(mode="retract"))
+
+        self.assertEqual(self.worker._pause_continue_futures, {})
+
+    async def test_unknown_late_broadcast_only_updates_pause_state(self):
+        await self.worker._apply_pause_continue_broadcast(
+            PauseContinueBroadcastReq(is_pause=True, operation_id="already-finished")
+        )
+
+        self.assertTrue(self.worker.is_pause)
+        self.assertEqual(self.worker._pause_continue_futures, {})
 
 
 if __name__ == "__main__":

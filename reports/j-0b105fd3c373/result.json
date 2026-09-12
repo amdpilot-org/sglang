@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33696",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the concurrent pause/continue waiter collision in TokenizerWorker and fixed it by carrying a unique operation ID through the router broadcast and storing pending futures by operation ID. Added reverse-order concurrency, cancellation, dispatch-failure, and late-broadcast regressions.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0b105fd3c373/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py -k 'PauseContinueWaiters'",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before issue reproduction on the prepared base: operation identity was absent and the concurrent/boundary regression failed (3 failed, 1 passed). Raw output: reports/j-0b105fd3c373/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b105fd3c373/venv/bin/python -m pytest -q test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after worker regression including reverse broadcast ordering, cancellation cleanup, dispatch-failure cleanup, and late broadcast state application (10 passed). Raw output: reports/j-0b105fd3c373/raw/passing-focused.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b105fd3c373/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_pause_generation.py",
+      "exit_code": 0,
+      "what_was_measured": "Existing scheduler pause/continue boundary suite (21 passed). Raw output: reports/j-0b105fd3c373/raw/passing-scheduler-boundary.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0b105fd3c373/venv/bin/python -m ruff check ... && /tmp/amdpilot-repo-j-0b105fd3c373/venv/bin/python -m ruff format --check ...",
+      "exit_code": 1,
+      "what_was_measured": "Formatting tool availability only: the prepared interpreter does not contain ruff. git diff --check passed. Raw output: reports/j-0b105fd3c373/raw/ruff.txt and ruff-format.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The defect and regression are asyncio/IPC control-plane behavior in TokenizerWorker; no GPU computation is involved, so no unrelated GPU smoke was used as evidence.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full HTTP server or multi-process model-serving reproduction was run because model weights were not provided; the deterministic regression exercises the actual TokenizerWorker coroutine and broadcast implementation directly.",
+    "The test does not claim model semantic accuracy, distributed behavior, or GPU kernel validation.",
+    "Ruff was unavailable in the prepared Python environment; git diff --check passed."
+  ]
+}
