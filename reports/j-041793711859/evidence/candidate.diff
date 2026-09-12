@@ -1,0 +1,297 @@
+diff --git a/python/sglang/srt/layers/attention/vision.py b/python/sglang/srt/layers/attention/vision.py
+index bff80a1..f1048f4 100644
+--- a/python/sglang/srt/layers/attention/vision.py
++++ b/python/sglang/srt/layers/attention/vision.py
+@@ -611,6 +611,9 @@ class VisionFlash4Attention(nn.Module):
+         Returns:
+              [b * s, h, head_size]
+         """
++        window_size = kwargs.get("window_size", (-1, -1))
++        s_aux = kwargs.get("s_aux", None)
++
+         if forward_metadata is not None:
+             cu_seqlens_gpu = forward_metadata.cu_seqlens
+             max_seqlen = forward_metadata.max_seqlen
+@@ -621,17 +624,18 @@ class VisionFlash4Attention(nn.Module):
+                 cu_seqlens_gpu, kwargs.get("max_seqlen")
+             )
+ 
+-        output = flash_attn_func(
+-            q,
+-            k,
+-            v,
++        fa_kwargs = dict(
+             cu_seqlens_q=cu_seqlens_gpu,
+             cu_seqlens_k=cu_seqlens_gpu,
+             max_seqlen_q=max_seqlen,
+             max_seqlen_k=max_seqlen,
+             softmax_scale=softmax_scale,
++            window_size=window_size,
+             ver=4,
+         )
++        if s_aux is not None:
++            fa_kwargs["sinks"] = s_aux
++        output = flash_attn_func(q, k, v, **fa_kwargs)
+ 
+         return output
+ 
+diff --git a/reports/j-9ad1f4f7fdea/README.md b/reports/j-9ad1f4f7fdea/README.md
+new file mode 100644
+index 0000000..245137a
+--- /dev/null
++++ b/reports/j-9ad1f4f7fdea/README.md
+@@ -0,0 +1,36 @@
++# Vision FA4 window/sink verification
++
++Base: `358c163250ad3b1f62939b01ce1314a0a31a0365`
++
++The base implementation passed `window_size` and `s_aux` from
++`VisionAttention.forward()` into the selected backend, but
++`VisionFlash4Attention.forward()` omitted both at its call to `flash_attn_func`.
++FA3 already preserved the same values. Upstream PR
++https://github.com/sgl-project/sglang/pull/38872 contained the same forwarding
++direction, so the production change here intentionally stays aligned with it.
++
++`test_vision_fa4_attention.py` instruments the external FA4 function boundary.
++It covers the default full-window/no-sink call, window-only, sink-only, and
++combined arguments, always requiring `ver=4`. Its end-to-end unit case runs the
++ordinary `VisionAttention.forward()` data path through `VisionFlash4Attention`
++and compares the returned tensor with a separate float32 implementation of the
++equal-length non-causal local mask and learned sink denominator.
++
++The baseline run was made by retaining the new regression while restoring the
++recorded-base implementation of `vision.py`. All five cases failed. The
++implementation fix was then restored and the focused suite passed. The raw
++pytest JUnit documents are `baseline.xml.gz` and `fixed.xml.gz`.
++
++Environment evidence from the prepared interpreter:
++
++- source: `/job/repo`
++- Python: `/tmp/amdpilot-repo-j-9ad1f4f7fdea/venv/bin/python`
++- native library: not rebuilt; no native source changed
++- Torch: `2.11.0+rocm7.2`
++- HIP: `7.2.26015`
++- visible device with `HIP_VISIBLE_DEVICES=0`: one AMD Instinct MI355X
++
++This host cannot run the CUDA-only FA4 CUTE kernel or qualify the reported
++Blackwell model path. The mocks establish the Python argument contract and the
++independent reference establishes the intended small-tensor semantics, but
++neither is reported as GPU execution.
+diff --git a/reports/j-9ad1f4f7fdea/baseline.xml.gz b/reports/j-9ad1f4f7fdea/baseline.xml.gz
+new file mode 100644
+index 0000000..47298a8
+Binary files /dev/null and b/reports/j-9ad1f4f7fdea/baseline.xml.gz differ
+diff --git a/reports/j-9ad1f4f7fdea/fixed.xml.gz b/reports/j-9ad1f4f7fdea/fixed.xml.gz
+new file mode 100644
+index 0000000..67d61fd
+Binary files /dev/null and b/reports/j-9ad1f4f7fdea/fixed.xml.gz differ
+diff --git a/reports/j-9ad1f4f7fdea/result.json b/reports/j-9ad1f4f7fdea/result.json
+new file mode 100644
+index 0000000..07b5f12
+--- /dev/null
++++ b/reports/j-9ad1f4f7fdea/result.json
+@@ -0,0 +1,38 @@
++{
++  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38871",
++  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
++  "outcome": "fixed",
++  "summary": "Reproduced that VisionFlash4Attention dropped window_size and s_aux at the external flash_attn_func boundary, then forwarded window_size, optional s_aux as sinks, and ver=4. Added CPU regression coverage for defaults, window-only, sink-only, combined arguments, and the actual VisionAttention-to-VisionFlash4Attention path. The combined path is checked against an independent explicit local-mask and attention-sink tensor reference.",
++  "tests": [
++    {
++      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad1f4f7fdea/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_vision_fa4_attention.py --junitxml=reports/j-9ad1f4f7fdea/baseline.xml",
++      "exit_code": 1,
++      "what_was_measured": "Recorded-base source behavior before the implementation change: 5/5 regressions failed. Four boundary cases had no window_size key, and the full VisionAttention path disagreed with the independent local-window/sink reference. Raw JUnit output is baseline.xml.gz."
++    },
++    {
++      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad1f4f7fdea/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_vision_fa4_attention.py test/registered/unit/layers/attention/test_vision_max_seqlen.py --junitxml=reports/j-9ad1f4f7fdea/fixed.xml",
++      "exit_code": 0,
++      "what_was_measured": "12 tests passed: FA4 boundary forwarding for default, window-only, sink-only, and combined cases; ver=4; actual VisionAttention routing; independent reference equality; and existing precomputed max-seqlen behavior. Raw JUnit output is fixed.xml.gz."
++    },
++    {
++      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9ad1f4f7fdea/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_vision_backend_selection.py test/registered/unit/layers/attention/test_vision_strided_qkv.py",
++      "exit_code": 0,
++      "what_was_measured": "24 adjacent VisionAttention backend-selection and QKV-layout tests passed."
++    },
++    {
++      "command": "/tmp/amdpilot-repo-j-9ad1f4f7fdea/venv/bin/python -m ruff check python/sglang/srt/layers/attention/vision.py test/registered/unit/layers/attention/test_vision_fa4_attention.py",
++      "exit_code": 1,
++      "what_was_measured": "Formatting/lint tool availability only: the prepared interpreter does not contain the ruff module. git diff --check passed separately."
++    }
++  ],
++  "gpu_execution": false,
++  "gpu_execution_evidence": "HIP_VISIBLE_DEVICES=0 exposed exactly one AMD Instinct MI355X with torch 2.11.0+rocm7.2 and HIP 7.2.26015. VisionFlash4Attention is CUDA-only and its FA4 CUTE kernel requires NVIDIA architecture, so the instrumented boundary tests are CPU tests and are not claimed as GPU kernel execution.",
++  "native_rebuilt": false,
++  "remaining_limitations": [
++    "The CUDA-only FA4 kernel was not executed or numerically qualified on this ROCm host.",
++    "No NVIDIA Blackwell GPU or MiMo-V2.5 multimodal model weights were available, so end-to-end model output remains unverified here.",
++    "The independent numerical reference verifies the intended equal-length non-causal local-window and learned-sink semantics at the instrumented external boundary; it is not a substitute for CUDA kernel qualification.",
++    "No native C++ or FlyDSL source changed, so no native rebuild was applicable.",
++    "The prepared Python environment lacks ruff; git diff --check passed and pytest coverage passed."
++  ]
++}
+diff --git a/test/registered/unit/layers/attention/test_vision_fa4_attention.py b/test/registered/unit/layers/attention/test_vision_fa4_attention.py
+new file mode 100644
+index 0000000..b397cba
+--- /dev/null
++++ b/test/registered/unit/layers/attention/test_vision_fa4_attention.py
+@@ -0,0 +1,160 @@
++"""CPU regressions for VisionAttention's external FA4 call boundary."""
++
++import pytest
++import torch
++from torch import nn
++
++from sglang.srt.layers.attention import vision
++from sglang.srt.runtime_context import get_context
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=8, suite="base-a-test-cpu")
++
++
++def _reference_attention(q, k, v, window_size, sinks, softmax_scale):
++    """Small independent reference for equal-length, non-causal FA attention."""
++    scores = torch.einsum("qhd,khd->hqk", q.float(), k.float()) * softmax_scale
++    left, right = window_size
++    if left >= 0 or right >= 0:
++        positions = torch.arange(q.shape[0])
++        distance = positions[:, None] - positions[None, :]
++        allowed = torch.ones_like(distance, dtype=torch.bool)
++        if left >= 0:
++            allowed &= distance <= left
++        if right >= 0:
++            allowed &= distance >= -right
++        scores = scores.masked_fill(~allowed.unsqueeze(0), float("-inf"))
++
++    maximum = scores.amax(dim=-1, keepdim=True)
++    if sinks is not None:
++        maximum = torch.maximum(maximum, sinks.float()[:, None, None])
++    weights = torch.exp(scores - maximum)
++    denominator = weights.sum(dim=-1, keepdim=True)
++    if sinks is not None:
++        denominator += torch.exp(sinks.float()[:, None, None] - maximum)
++    return torch.einsum("hqk,khd->qhd", weights / denominator, v.float()).to(q)
++
++
++@pytest.mark.parametrize(
++    ("forward_kwargs", "expected_window", "expect_sinks"),
++    [
++        ({}, (-1, -1), False),
++        ({"window_size": (2, 1)}, (2, 1), False),
++        ({"s_aux": torch.tensor([0.25])}, (-1, -1), True),
++        (
++            {"window_size": (2, 1), "s_aux": torch.tensor([0.25])},
++            (2, 1),
++            True,
++        ),
++    ],
++)
++def test_vision_flash4_forwards_optional_attention_semantics(
++    monkeypatch, forward_kwargs, expected_window, expect_sinks
++):
++    captured = {}
++
++    def external_fa4_boundary(q, k, v, **kwargs):
++        captured.update(kwargs)
++        return q
++
++    monkeypatch.setattr(vision, "_is_cuda", True)
++    monkeypatch.setattr(
++        vision, "flash_attn_func", external_fa4_boundary, raising=False
++    )
++    attention = vision.VisionFlash4Attention()
++    q = torch.zeros(4, 1, 8)
++    cu_seqlens = torch.tensor([0, 4], dtype=torch.int32)
++
++    assert (
++        attention(q, q, q, cu_seqlens, bsz=1, seq_len=4, **forward_kwargs) is q
++    )
++    assert captured["window_size"] == expected_window
++    assert captured["ver"] == 4
++    if expect_sinks:
++        assert captured["sinks"] is forward_kwargs["s_aux"]
++    else:
++        assert "sinks" not in captured
++
++
++class _FixedQKV(nn.Module):
++    def __init__(self, q, k, v):
++        super().__init__()
++        self.qkv = torch.cat((q, k, v), dim=-1).unsqueeze(0)
++
++    def forward(self, _):
++        return self.qkv, None
++
++
++class _IdentityProjection(nn.Module):
++    def forward(self, x):
++        return x, None
++
++
++def test_vision_attention_preserves_local_window_and_sink_at_fa4_boundary(
++    monkeypatch,
++):
++    """Exercise VisionAttention -> VisionFlash4Attention, including semantics."""
++    q = torch.tensor([[[-1.0, 0.5]], [[0.2, 1.1]], [[0.7, -0.4]], [[1.2, 0.3]]])
++    k = torch.tensor([[[0.4, -0.8]], [[1.0, 0.2]], [[-0.3, 0.9]], [[0.6, 0.7]]])
++    v = torch.tensor([[[1.0, 2.0]], [[3.0, -1.0]], [[-2.0, 0.5]], [[0.4, 4.0]]])
++    window_size = (1, 0)
++    sinks = torch.tensor([0.6])
++    scale = 0.5
++    captured = {}
++
++    def external_fa4_boundary(q_arg, k_arg, v_arg, **kwargs):
++        captured.update(kwargs)
++        return _reference_attention(
++            q_arg,
++            k_arg,
++            v_arg,
++            kwargs.get("window_size", (-1, -1)),
++            kwargs.get("sinks"),
++            kwargs["softmax_scale"],
++        )
++
++    monkeypatch.setattr(
++        vision, "flash_attn_func", external_fa4_boundary, raising=False
++    )
++
++    # Build only the ordinary VisionAttention data path; fixed projections keep
++    # this regression independent of distributed initialization and GPU kernels.
++    layer = vision.VisionAttention.__new__(vision.VisionAttention)
++    nn.Module.__init__(layer)
++    layer.qkv_proj = _FixedQKV(q, k, v)
++    layer.proj = _IdentityProjection()
++    layer.qkv_backend = vision.VisionFlash4Attention.__new__(
++        vision.VisionFlash4Attention
++    )
++    nn.Module.__init__(layer.qkv_backend)
++    layer.use_qkv_parallel = True
++    layer.pass_strided_qkv = False
++    layer.q_size = layer.kv_size = layer.head_size = 2
++    layer.num_attention_heads_per_partition = 1
++    layer.num_attention_kv_heads_per_partition = 1
++    layer.qk_normalization = False
++    layer.qk_normalization_by_head_size = False
++    layer.customized_position_embedding_applier = None
++    layer.softmax_scale = scale
++    layer.sinks = nn.Parameter(sinks, requires_grad=False)
++    layer.window_size = window_size
++    layer.tp_rank = 0
++
++    with get_context().override_server_args():
++        output = layer(
++            torch.empty(1, 4, 2),
++            cu_seqlens=torch.tensor([0, 4], dtype=torch.int32),
++            max_seqlen=4,
++            full_attn=False,
++        )
++    expected = _reference_attention(q, k, v, window_size, sinks, scale).reshape(
++        1, 4, 2
++    )
++
++    torch.testing.assert_close(output, expected, rtol=0, atol=0)
++    assert captured["window_size"] == window_size
++    assert torch.equal(captured["sinks"], layer.sinks)
++    assert captured["sinks"].untyped_storage().data_ptr() == (
++        layer.sinks.untyped_storage().data_ptr()
++    )
++    assert captured["ver"] == 4
