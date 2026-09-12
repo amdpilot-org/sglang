@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32485",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2840",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2808",
+  "candidate_commit": "8c799873170db6688e35734e591e36a5f188eaa5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a functional partial fix: it selects the requested native or Hugging Face MTP layer shards plus draft-wide shared shards before constructing the RunAI iterator, and safely falls back for the candidate's tested missing, malformed, unknown-layout, absent-layer, and absent-shard cases. However, it does not safely handle an incomplete index when existing loader logic has deliberately auto-added an unindexed mtp.safetensors file. In that real call path, the candidate prunes the supplemental file and can make a previously loadable checkpoint partial.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0f87f992fe/venv/bin/python /job/base_candidate_review.py",
+      "revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+      "exit_code": 0,
+      "what_was_measured": "Captured the exact shard list passed to runai_safetensors_weights_iterator for both required layouts. The base passed all target and draft shards, reproducing the original excess-I/O behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0f87f992fe/venv/bin/python -m pytest -q test/registered/unit/model_loader/test_runai_model_streamer_loader.py",
+      "revision": "8c799873170db6688e35734e591e36a5f188eaa5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 15 tests and 6 subtests passed, including iterator input-list assertions and advertised fallbacks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0f87f992fe/venv/bin/python /job/base_candidate_review.py",
+      "revision": "8c799873170db6688e35734e591e36a5f188eaa5",
+      "exit_code": 0,
+      "what_was_measured": "Independent iterator capture confirmed both model.mtp.layers.<index> and mtp.<index> layouts select only the requested layer shard and draft-wide shared shard."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-af0f87f992fe/venv/bin/python /job/candidate_adversarial.py",
+      "revision": "8c799873170db6688e35734e591e36a5f188eaa5",
+      "exit_code": 1,
+      "what_was_measured": "Real _get_weights_iterator call order with Glm4Moe metadata and an unindexed mtp.safetensors. maybe_add_mtp_safetensors added the required supplemental file, but _select_mtp_safetensors removed it before the RunAI iterator; the independent assertion failed."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..8c799873170db6688e35734e591e36a5f188eaa5 --check",
+      "revision": "8c799873170db6688e35734e591e36a5f188eaa5",
+      "exit_code": 0,
+      "what_was_measured": "Candidate patch whitespace validation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The changed behavior is deterministic JSON index parsing and pre-iterator Python file-list selection. No tensor computation or GPU kernel/native path changed, so GPU numerical execution would not validate this contract."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "The candidate changes only Python loader/test/report files and no native source or extension. The loaded source was confirmed as /job/repo/python/sglang/srt/model_loader/loader.py under both revisions.",
+  "remaining_counterexamples": [
+    "When maybe_add_mtp_safetensors appends an existing mtp.safetensors that is absent from the index, and the same index contains a recognized requested-layer entry, _select_mtp_safetensors drops the auto-added file instead of falling back to the complete prepared list. This contradicts the safe fallback requirement for incomplete index metadata and can omit required draft tensors."
+  ],
+  "remaining_limitations": [
+    "No object-storage credentials or large production MTP checkpoint were available, so remote provider I/O reduction was verified through URI/path-list behavior rather than live header-read counts.",
+    "No model weights were needed or used; full model semantic accuracy and distributed loading were not exercised.",
+    "GPU execution and native rebuild were not applicable to this Python-only file-selection change."
+  ]
+}
