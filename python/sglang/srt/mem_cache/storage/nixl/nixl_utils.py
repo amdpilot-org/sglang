@@ -1,8 +1,10 @@
 import logging
 import os
+import re
 from typing import Optional
 
 from sglang.srt.environ import envs
+from sglang.srt.mem_cache.hicache_storage import PoolName
 from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
     _BUCKET_MASK,
     BUCKET_HEX_CHARS,
@@ -10,6 +12,37 @@ from sglang.srt.mem_cache.storage.nixl.nixl_routing import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CACHE_KEY_HEX_LENGTH = 64
+_POOL_NAME_PATTERN = "|".join(
+    sorted((re.escape(pool.value) for pool in PoolName), key=len, reverse=True)
+)
+_COMPONENT_SUFFIX_RE = re.compile(
+    rf"_(?:(?:{_POOL_NAME_PATTERN})(?:_(?:temporal|conv_\d+|[kv]|\d+))?|[kv])$"
+)
+
+
+def _name_matches_suffix(name: str, suffix: str) -> bool:
+    """Return whether a cache file belongs to an instance suffix.
+
+    NIXL cache file names start with a SHA-256 page key, followed by the
+    instance suffix and, optionally, a component suffix from the key formats
+    produced by ``HiCacheNixl``.
+    Anchoring the suffix after the fixed-width key avoids treating a shorter
+    model name as the underscore-delimited tail of a longer model name.
+    """
+    key = name[:_CACHE_KEY_HEX_LENGTH]
+    if len(key) != _CACHE_KEY_HEX_LENGTH or any(
+        char not in "0123456789abcdef" for char in key
+    ):
+        return False
+
+    scoped_name = name[_CACHE_KEY_HEX_LENGTH:]
+    if not scoped_name.startswith(suffix):
+        return False
+    remainder = scoped_name[len(suffix) :]
+    return not remainder or _COMPONENT_SUFFIX_RE.fullmatch(remainder) is not None
+
 
 _SGLANG_NIXL_CONFIG_KEYS = {
     "use_direct_io",
@@ -233,16 +266,26 @@ class NixlFileManager:
                 f"Initialized file manager with base directories: {self.base_dirs}. Direct I/O: {use_direct_io}"
             )
 
-    def clear(self) -> None:
-        """Clear all files below every configured base directory."""
+    def clear(self, suffix: Optional[str] = None) -> None:
+        """Clear only files belonging to the supplied instance suffix."""
         if not self.base_dirs:
             logger.warning("Base directories are empty, skipping clear operation")
+            return
+
+        if not suffix or suffix == "_":
+            logger.error(
+                "Refusing to clear NIXL files without a usable instance suffix "
+                "(suffix=%r)",
+                suffix,
+            )
             return
 
         for base in self.base_dirs:
             try:
                 for root, _dirs, files in os.walk(base):
                     for file in files:
+                        if not _name_matches_suffix(file, suffix):
+                            continue
                         file_path = os.path.join(root, file)
                         try:
                             os.remove(file_path)
@@ -250,7 +293,11 @@ class NixlFileManager:
                             logger.warning(f"Failed to remove file {file_path}: {e}")
             except Exception as e:
                 logger.error(f"Failed to clear base directory {base}: {e}")
-        logger.debug(f"Cleared all files in base directories: {self.base_dirs}")
+        logger.debug(
+            "Cleared files with suffix %r in base directories: %s",
+            suffix,
+            self.base_dirs,
+        )
 
     def ensure_all_bucket_dirs(self) -> None:
         """Pre-create every possible bucket directory under each base dir.

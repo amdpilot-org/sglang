@@ -609,7 +609,7 @@ class HiCacheNixl(HiCacheStorage):
     def clear(self) -> None:
         if self.file_manager is None:
             return
-        self.file_manager.clear()
+        self.file_manager.clear(suffix=self.config_suffix)
 
     def close(self):
         if self._l3_cleaner is not None:
