@@ -121,6 +121,64 @@ class _DecodeReq:
 
 
 class TestPrefillHiddenStateOffsets(CustomTestCase):
+    def test_ordinary_generation_bypasses_hidden_state_response_slicing(self):
+        """Generated tokens do not depend on the optional response slicer."""
+        req = _PrefillReq(
+            rid="ordinary-generation",
+            inflight_middle_chunks=0,
+            return_hidden_states=False,
+        )
+        batch = SimpleNamespace(
+            reqs=[req],
+            decoding_reqs=[],
+            return_logprob=False,
+            return_hidden_states=False,
+            return_hidden_states_mode=CaptureHiddenMode.NULL,
+            spec_info=None,
+            prefill_stats=None,
+            dp_cooperation_info=None,
+        )
+        result = SimpleNamespace(
+            copy_done=None,
+            auxiliary_host_output=None,
+            routed_experts_output=None,
+            indexer_topk_output=None,
+            logits_output=SimpleNamespace(
+                hidden_states=torch.tensor([[999.0]]),
+                customized_info=None,
+                sampling_mask_output=None,
+            ),
+            next_token_ids=torch.tensor([17]),
+            extend_input_len_per_req=None,
+            extend_logprob_start_len_per_req=None,
+            grammar_advanced=False,
+            can_run_cuda_graph=False,
+            skipped_output_comm=False,
+        )
+        processor = _make_processor(self)
+
+        with (
+            patch.object(
+                SchedulerBatchResultProcessor,
+                "_append_prefill_hidden_states",
+                side_effect=AssertionError("ordinary generation entered response slicing"),
+            ) as append_hidden_states,
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.maybe_cache_unfinished_req"
+            ),
+            patch(
+                "sglang.srt.managers.scheduler_components."
+                "batch_result_processor.get_memory",
+                return_value=SimpleNamespace(enable_hisparse=False),
+            ),
+        ):
+            processor.process_batch_result_prefill(batch, result)
+
+        append_hidden_states.assert_not_called()
+        self.assertEqual(req.output_ids, [17])
+        self.assertEqual(req.hidden_states, [])
+
     def test_non_requesting_request_still_advances_full_capture_offset(self):
         """A later requester must not receive an earlier request's rows."""
         processor = _make_processor(self)
