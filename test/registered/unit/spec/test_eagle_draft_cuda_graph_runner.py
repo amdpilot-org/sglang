@@ -203,5 +203,32 @@ class TestEagleDraftCudaGraphRunner(CustomTestCase):
         self.assertIsNone(forward_batch.seq_lens_sum)
 
 
+class TestEagleDraftCudaGraphAdmission(CustomTestCase):
+    def _can_run_graph(self, num_tokens_per_req):
+        runner = EAGLEDraftCudaGraphRunner.__new__(EAGLEDraftCudaGraphRunner)
+        runner.captured_req_width = 1
+        runner.require_mlp_tp_gather = False
+        runner.disable_padding = False
+        runner.max_bs = 4
+        runner.require_mlp_sync = False
+        forward_batch = SimpleNamespace(
+            batch_size=1,
+            spec_info=SimpleNamespace(num_tokens_per_req=num_tokens_per_req),
+        )
+        return runner.can_run_graph(forward_batch)
+
+    def test_rejects_width_mismatch_before_replay(self):
+        # A one-request batch carrying two token rows would otherwise reach
+        # execute() and reproduce the issue's [2, width] -> [1, width] seed
+        # copy mismatch. It must use the eager path instead.
+        self.assertFalse(self._can_run_graph(num_tokens_per_req=2))
+
+    def test_accepts_matching_width(self):
+        self.assertTrue(self._can_run_graph(num_tokens_per_req=1))
+
+    def test_accepts_unset_width_for_legacy_callers(self):
+        self.assertTrue(self._can_run_graph(num_tokens_per_req=-1))
+
+
 if __name__ == "__main__":
     unittest.main()
