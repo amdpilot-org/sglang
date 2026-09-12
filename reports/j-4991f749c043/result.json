@@ -1,0 +1,64 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32200",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2844",
+  "candidate_mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2746",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2814",
+  "candidate_commit": "a919f1c5af0c12fe6d9c94af9f70633b3780996f",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds the requested ctypes surface, allocator window-handle retention, and an RMA warm-up abstraction, and its focused mock/ABI suite passes. The changed embedded allocator was rebuilt from the candidate checkout and used successfully on the assigned MI350X. However, the candidate redeclares ncclConfig_t and thereby removes the existing create() classmethod. Existing symmetric-memory communicator initialization still calls ncclConfig_t.create(), and an independent call through the actual pinned RCCL fails with AttributeError before communicator creation. The submitted tests do not cover this established path. The actual multi-rank RMA protocol also remains unverified because the environment has one AMD GPU and RCCL 2.27.7, which lacks the RMA symbols.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4991f749c043/venv/bin/python <base contract probe>",
+      "exit_code": 1,
+      "what_was_measured": "At recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, the RMA module, RMA function table, put_signal, and nccl_mem_alloc were absent, reproducing the original missing-feature contract. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/base-reproduction.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4991f749c043/venv/bin/python -m pytest -q test/registered/distributed/test_pynccl_rma.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate a919f1c5af0c12fe6d9c94af9f70633b3780996f, 15 submitted compatibility/mock tests passed and both real two-GPU tests skipped. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/candidate-focused.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4991f749c043/venv/bin/python <independent ncclConfig_t API probe>",
+      "exit_code": 1,
+      "what_was_measured": "At the candidate, ncclConfig_t no longer has the create() classmethod required by two existing call sites. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/candidate-adversarial-config.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_NCCL_SO_PATH=/opt/rocm-7.2.4/lib/librccl.so /tmp/amdpilot-repo-j-4991f749c043/venv/bin/python <real RCCL ncclCommInitRankConfig default-config probe>",
+      "exit_code": 1,
+      "what_was_measured": "The actual pinned RCCL 2.27.7 loaded and produced a unique ID, but NCCLLibrary.ncclCommInitRankConfig(1, uid, 0) failed with AttributeError: ncclConfig_t has no attribute create. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/candidate-adversarial-real-config.log"
+    },
+    {
+      "command": "TMPDIR=/tmp/amdpilot-repo-j-4991f749c043/build-tmp TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-4991f749c043/torch-extensions PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4991f749c043/venv/bin/python <native allocator rebuild and GPU probe>",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt candidate embedded C++ into /tmp/symm_allocator/nccl_allocator.so, linked it to RCCL, confirmed all three allocator registration/window accessor exports, allocated an arange tensor from the pool on AMD Instinct MI350X, and matched the independent CPU reference exactly. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/candidate-native-gpu.log and import-native-paths.log"
+    },
+    {
+      "command": "nm -D /opt/rocm-7.2.4/lib/librccl.so | rg 'nccl(GetVersion|CommWindow|PutSignal|WaitSignal|Signal|WinGetUserPtr|GetPeerDevicePointer|MemAlloc|MemFree|CommInitRankConfig)'",
+      "exit_code": 0,
+      "what_was_measured": "Pinned RCCL exports window registration, memory allocation, version, and configured-init APIs, but none of ncclPutSignal, ncclSignal, ncclWaitSignal, ncclWinGetUserPtr, or ncclGetPeerDevicePointer. Runtime version was 2.27.7 and has_rma was false. Evidence: /tmp/amdpilot-repo-j-4991f749c043/review-evidence/candidate-native-gpu.log"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "One AMD Instinct MI350X (gfx950) was available. The rebuilt allocator performed a real device allocation and exact CPU-reference comparison. No RMA operation executed because only one GPU was assigned and RCCL 2.27.7 lacks the RMA API."
+  },
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "With the candidate loaded, NCCLLibrary.ncclCommInitRankConfig(world_size, unique_id, rank) takes its supported default-config path and raises AttributeError because the replacement ncclConfig_t has no create() method.",
+    "PyNcclCommunicator construction with symmetric memory enabled reaches the same ncclConfig_t.create() call and fails before creating the communicator.",
+    "The candidate's own focused suite passes while omitting both existing ncclConfig_t.create() call sites, demonstrating test-only coverage is insufficient to guard compatibility."
+  ],
+  "remaining_limitations": [
+    "The environment exposes exactly one AMD Instinct MI350X, so handle exchange and the two-rank ring put_signal/wait_signal handshake could not execute.",
+    "Pinned RCCL 2.27.7 does not export the five RMA symbols, so successful NCCL >= 2.30 RMA, NVLink, PCIe-only NULL-window, and vGPU behavior remain unverified.",
+    "The candidate calls libcudart.so directly in its warm-up; that path could not be evaluated on this ROCm-only node because capability gating prevents entry and no NVIDIA runtime/hardware was available.",
+    "The allocator rebuild validates compilation, linkage, exports, and ordinary GPU allocation, but does not validate the new stored window-handle values because this RCCL cannot provide RMA-capable handles.",
+    "No production TP/EP path consumes NcclRmaCommunicator; the original proposal primarily requests the primitive and warm-up abstraction, but end-to-end serving impact is therefore not demonstrated."
+  ],
+  "evidence_root": "/tmp/amdpilot-repo-j-4991f749c043/review-evidence",
+  "source_import_root": "/job/repo/python",
+  "native_library_path": "/tmp/symm_allocator/nccl_allocator.so"
+}
