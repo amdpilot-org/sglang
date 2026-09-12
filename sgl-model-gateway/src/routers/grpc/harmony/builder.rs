@@ -43,6 +43,23 @@ pub(super) fn get_harmony_encoding() -> &'static HarmonyEncoding {
 /// Built-in tools that are added to the system message
 const BUILTIN_TOOLS: &[&str] = &["web_search_preview", "code_interpreter", "container"];
 
+fn harmony_reasoning_effort(effort: &ResponsesReasoningEffort) -> ReasoningEffort {
+    match effort {
+        ResponsesReasoningEffort::Minimal | ResponsesReasoningEffort::Low => ReasoningEffort::Low,
+        ResponsesReasoningEffort::Medium => ReasoningEffort::Medium,
+        ResponsesReasoningEffort::High => ReasoningEffort::High,
+    }
+}
+
+fn harmony_reasoning_effort_from_str(effort: &str) -> ReasoningEffort {
+    match effort {
+        "none" | "minimal" | "low" => ReasoningEffort::Low,
+        "medium" => ReasoningEffort::Medium,
+        "high" | "xhigh" | "max" => ReasoningEffort::High,
+        _ => ReasoningEffort::Medium,
+    }
+}
+
 /// Trait for tool-like objects that can be converted to Harmony ToolDescription
 trait ToolLike {
     /// Check if this is a built-in tool (should be skipped in developer message)
@@ -274,14 +291,7 @@ impl HarmonyBuilder {
         let reasoning_effort = request
             .reasoning_effort
             .as_deref()
-            .map(|effort| match effort {
-                "high" => ReasoningEffort::High,
-                "medium" => ReasoningEffort::Medium,
-                "low" => ReasoningEffort::Low,
-                // Harmony does not support minimal reasoning effort
-                "minimal" => ReasoningEffort::Low,
-                _ => ReasoningEffort::Medium,
-            });
+            .map(harmony_reasoning_effort_from_str);
 
         let has_tools = request.tools.is_some();
         self.build_system_message(reasoning_effort, has_tools)
@@ -301,12 +311,7 @@ impl HarmonyBuilder {
             .reasoning
             .as_ref()
             .and_then(|r| r.effort.as_ref())
-            .map(|effort| match effort {
-                ResponsesReasoningEffort::High => ReasoningEffort::High,
-                ResponsesReasoningEffort::Medium => ReasoningEffort::Medium,
-                ResponsesReasoningEffort::Low => ReasoningEffort::Low,
-                ResponsesReasoningEffort::Minimal => ReasoningEffort::Low,
-            });
+            .map(harmony_reasoning_effort);
 
         self.build_system_message(reasoning_effort, with_custom_tools)
     }
@@ -904,5 +909,44 @@ impl HarmonyBuilder {
 impl Default for HarmonyBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn harmony_effort_clamps_every_openai_tier() {
+        use ResponsesReasoningEffort as Tier;
+
+        for (tier, expected) in [
+            (Tier::Minimal, ReasoningEffort::Low),
+            (Tier::Low, ReasoningEffort::Low),
+            (Tier::Medium, ReasoningEffort::Medium),
+            (Tier::High, ReasoningEffort::High),
+        ] {
+            assert_eq!(harmony_reasoning_effort(&tier), expected, "{tier:?}");
+        }
+
+        for (tier, expected) in [
+            ("none", ReasoningEffort::Low),
+            ("minimal", ReasoningEffort::Low),
+            ("low", ReasoningEffort::Low),
+            ("medium", ReasoningEffort::Medium),
+            ("high", ReasoningEffort::High),
+            ("xhigh", ReasoningEffort::High),
+            ("max", ReasoningEffort::High),
+        ] {
+            assert_eq!(harmony_reasoning_effort_from_str(tier), expected, "{tier}");
+        }
+    }
+
+    #[test]
+    fn harmony_effort_unknown_defaults_to_medium() {
+        assert_eq!(
+            harmony_reasoning_effort_from_str("unknown"),
+            ReasoningEffort::Medium
+        );
     }
 }
