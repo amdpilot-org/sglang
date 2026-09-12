@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33181",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the Inkling first-block tool-name leak in the prepared checkout for one-shot and streamed parsing, then fixed it by buffering ambiguous out-of-block text until the following control token determines whether it is a tool header. Added regression coverage for JSON and raw-text tool markers and boundary coverage for ordinary unframed output and continue_final_message.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b01d481bcf71/venv/bin/python reports/j-b01d481bcf71/reproduce_inkling_leak.py (before patch)",
+      "exit_code": 0,
+      "what_was_measured": "Full reasoning-parser then FunctionCallParser pipeline. Both one-shot and 7-character streaming produced visible='get_weather' plus a valid get_weather({}) call for the missing-opener case; opener-present and thinking-first controls had empty visible content. Raw output: reports/j-b01d481bcf71/raw/reproduction-before.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b01d481bcf71/venv/bin/python reports/j-b01d481bcf71/reproduce_inkling_leak.py (after patch)",
+      "exit_code": 0,
+      "what_was_measured": "The same full parser pipeline produced empty visible content and a valid get_weather({}) call for all three cases in both modes. Raw output: reports/j-b01d481bcf71/raw/reproduction-final.txt."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b01d481bcf71/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py test/registered/unit/function_call/test_function_call_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "367 focused parser tests passed, including the failing-before issue regression for 1- and 7-character streaming, both Inkling tool marker variants, and independent unframed/continuation boundaries. Raw output: reports/j-b01d481bcf71/raw/test-focused-final.txt."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/parser/reasoning_parser.py test/registered/unit/parser/test_reasoning_parser.py reports/j-b01d481bcf71/reproduce_inkling_leak.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, secret, and relevant registration checks passed for changed Python files. Raw output: reports/j-b01d481bcf71/raw/pre-commit-final.txt."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The defect and correction are deterministic CPU-only parser state-machine behavior; no model execution or GPU kernel is involved. The assigned GPU was therefore not used.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No end-to-end request was run against real Inkling model weights, so model generation behavior and the reported hosted-session incidence were not measured.",
+    "No HTTP serving-path run was claimed; the retained fixture exercises the same reasoning-parser to tool-parser order without model inference.",
+    "An existing upstream candidate PR, https://github.com/sgl-project/sglang/pull/34051, was inspected before implementation and remained open at investigation time."
+  ]
+}

@@ -1226,18 +1226,22 @@ class InklingDetector(BaseReasoningFormatDetector):
             reasoning_default="always",
         )
 
-        self._kind: str | None = None
+        # continue_final_message resumes inside an open <|content_text|> block,
+        # so its first run is visible text rather than a possible tool header.
+        self._kind: str | None = "content" if continue_final_message else None
         self._pending_header = ""
         self._pending_reasoning = ""
 
     def detect_and_parse(self, text: str) -> StreamingParseResult:
         self._buffer = ""
-        self._kind = None
+        self._kind = "content" if self.continue_final_message else None
         self._pending_header = ""
         self._pending_reasoning = ""
         ret = self._parse_blocks(text)
         if self._kind == "reasoning" and not self.stream_reasoning:
             ret.reasoning_text += self._pending_reasoning
+        if self._kind is None:
+            ret.normal_text += self._pending_header
         self._kind = None
         self._pending_header = ""
         self._pending_reasoning = ""
@@ -1261,11 +1265,14 @@ class InklingDetector(BaseReasoningFormatDetector):
         reasoning_text = ""
         if self._kind == "reasoning" and not self.stream_reasoning:
             reasoning_text = self._pending_reasoning
+        normal_text = self._pending_header if self._kind is None else ""
         self._buffer = ""
         self._pending_reasoning = ""
         self._pending_header = ""
         self._kind = None
-        return StreamingParseResult(reasoning_text=reasoning_text)
+        return StreamingParseResult(
+            normal_text=normal_text, reasoning_text=reasoning_text
+        )
 
     @staticmethod
     def _partial_control_length(text: str) -> int:
@@ -1282,7 +1289,6 @@ class InklingDetector(BaseReasoningFormatDetector):
     def _parse_blocks(self, text: str) -> StreamingParseResult:
         reasoning: list[str] = []
         content: list[str] = []
-        saw_control = False
         pos = 0
 
         def emit(text: str) -> None:
@@ -1295,21 +1301,23 @@ class InklingDetector(BaseReasoningFormatDetector):
                 content.append(text)
             elif self._kind == "tool":
                 content.append(text)
-            elif self._kind == "header":
+            else:
+                # A run with no open block may still be the header of a
+                # first-block tool call. Buffer it until the next control token
+                # distinguishes that case from ordinary visible text.
                 self._pending_header += text
-            elif text:
-                # No open block — e.g. a continue_final_message stream resuming
-                # mid text block. Route to visible content, matching the
-                # no-control-token path below.
-                content.append(text)
 
         def flush_reasoning() -> None:
             if self._kind == "reasoning" and not self.stream_reasoning:
                 reasoning.append(self._pending_reasoning)
                 self._pending_reasoning = ""
 
+        def flush_header() -> None:
+            if self._kind is None:
+                content.append(self._pending_header)
+            self._pending_header = ""
+
         for match in _INKLING_CONTROL_RE.finditer(text):
-            saw_control = True
             emit(text[pos : match.start()])
 
             token = match.group(0)
@@ -1317,7 +1325,7 @@ class InklingDetector(BaseReasoningFormatDetector):
             if token == MESSAGE_MODEL:
                 if self._kind in (None, "header"):
                     flush_reasoning()
-                    self._pending_header = ""
+                    flush_header()
                     self._kind = "header"
                 else:
                     # Inside an open block a decoded <|message_model|> string
@@ -1329,7 +1337,7 @@ class InklingDetector(BaseReasoningFormatDetector):
                 # Preserve the tool-invocation framing (json and headerless raw
                 # text) in content so the tool-call detector receives it.
                 flush_reasoning()
-                if self._kind == "header":
+                if self._kind in (None, "header"):
                     content.extend((MESSAGE_MODEL, self._pending_header, token))
                     self._pending_header = ""
                 else:
@@ -1341,18 +1349,14 @@ class InklingDetector(BaseReasoningFormatDetector):
                     self._kind = None
             elif token in _INKLING_CONTENT_KINDS:
                 flush_reasoning()
-                self._pending_header = ""
+                flush_header()
                 self._kind = _INKLING_CONTENT_KINDS[token]
             elif token in _INKLING_END_TOKENS:
                 flush_reasoning()
-                self._pending_header = ""
+                flush_header()
                 self._kind = None
 
-        tail = text[pos:]
-        if saw_control or self._kind is not None:
-            emit(tail)
-        else:
-            content.append(text)
+        emit(text[pos:])
 
         return StreamingParseResult(
             normal_text="".join(content),
