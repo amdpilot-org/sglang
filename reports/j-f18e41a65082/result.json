@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38075",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2715",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2709",
+  "candidate_commit": "2d936043ec8b8908941ba527ddfc82310fa08c9a",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate was rebuilt and independently confirms a partial implementation of grpc.health.v1 Health beside the native service. It does not implement the original issue's multimodal transport/coverage or RL lifecycle contract. Its Check behavior and ordinary registered-service transitions work, but its Watch behavior does not fully conform to the protocol contract: it emits duplicate responses while status is unchanged, and Watch for an unknown service terminates with NOT_FOUND rather than returning SERVICE_UNKNOWN and keeping the stream open. Request changes before accepting even the standard-health portion.",
+  "tests": [
+    {
+      "command": "Base: cargo +1.92.0 build --release --locked -p sglang-grpc; load /tmp/amdpilot-repo-j-f18e41a65082/base-target/release/libsglang_grpc_core.so and call grpc.health.v1.Health/Check",
+      "exit_code": 0,
+      "what_was_measured": "A native rebuild from recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365 reproduced the original standard-health gap: Check returned UNIMPLEMENTED."
+    },
+    {
+      "command": "Candidate: CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f18e41a65082/candidate-target cargo +1.92.0 build --release --locked -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "Rebuilt the exact candidate's optimized native library; subsequent live tests loaded /tmp/amdpilot-repo-j-f18e41a65082/candidate-target/release/libsglang_grpc_core.so."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f18e41a65082/candidate-target cargo +1.92.0 test -p sglang-grpc",
+      "exit_code": 0,
+      "what_was_measured": "All 14 Rust unit tests passed."
+    },
+    {
+      "command": "Preload rebuilt candidate extension; pytest -q test/registered/unit/entrypoints/test_grpc_standard_health.py test/registered/unit/entrypoints/test_grpc_bridge.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression plus compatibility test: 6 passed and 2 subtests passed against the rebuilt native artifact."
+    },
+    {
+      "command": "python /job/review-evidence-j-f18e41a65082/adversarial_health.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent live grpcio checks verified initial NOT_SERVING, false-to-true recovery, exception-to-NOT_SERVING recovery, clean poller shutdown, duplicate unchanged Watch emissions, and NOT_FOUND termination for unknown-service Watch."
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-f18e41a65082/candidate-target cargo +1.92.0 clippy -p sglang-grpc --all-targets -- -D warnings",
+      "exit_code": 0,
+      "what_was_measured": "Candidate Rust targets passed clippy with warnings denied after adding the pinned toolchain's clippy component."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "No GPU execution was appropriate for this control-plane-only candidate. The node exposes one AMD Instinct MI350X (gfx950) through Torch 2.11.0+rocm7.2 / HIP 7.2, but the candidate contains no GPU numerical path.",
+  "native_rebuilt": true,
+  "remaining_counterexamples": [
+    "With engine health held constant at NOT_SERVING, Watch receives another NOT_SERVING response on the next one-second poll. The protocol says Watch sends another response when serving status changes; unconditional publication creates duplicate unchanged events.",
+    "Watch for never.registered.Service terminates with gRPC NOT_FOUND. The bundled grpc.health.v1 proto requires a SERVICE_UNKNOWN response without terminating the call so a later registration can be observed.",
+    "Native gRPC multimodal image, audio, and video inputs remain unimplemented and unverified, including aggregated and encoder-disaggregated coverage.",
+    "RL operations and explicit pause/drain, weight-update, ready-to-serve, and resume lifecycle semantics remain unimplemented and unverified."
+  ],
+  "remaining_limitations": [
+    "No model server, model weights, multimodal architecture, encoder-disaggregated deployment, RL workload, or distributed workload was exercised because the candidate does not implement those original-issue portions.",
+    "The prepared environment initially lacked Rust; Rust 1.92.0 and clippy were installed under the private job runtime without changing the pinned Torch/ROCm stack.",
+    "No inference or GPU numerical claim is made. Testing was x86_64 Linux native control-plane execution on an AMD MI350X host."
+  ]
+}
