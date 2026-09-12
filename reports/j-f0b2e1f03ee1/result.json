@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/16255",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Extracted the remaining DeepSeek V3.2/DSA model-construction and pipeline top-k routing policy from deepseek_v2.py into deepseek_common/v32_mixin.py while preserving the existing DeepseekV2AttentionMLA, DeepseekV2Model, and model entry-point APIs. Added compatibility and adversarial coverage for non-DSA configurations, skip-topk and NextN layers, IndexerKPool arguments, MHA-versus-MLA routing, and pipeline-stage top-k boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f0b2e1f03ee1/venv/bin/python -m pytest -q test/registered/unit/models/test_deepseek_v32_mixin.py test/registered/unit/models/test_deepseek_mla_dispatch.py",
+      "exit_code": 0,
+      "what_was_measured": "16 focused unit tests and 8 subtests covering the extracted V3.2 mixins and existing MLA dispatch compatibility. Raw output: reports/j-f0b2e1f03ee1/focused-final.log"
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-f0b2e1f03ee1/pre-commit-cache pre-commit run --files python/sglang/srt/models/deepseek_v2.py python/sglang/srt/models/deepseek_common/v32_mixin.py test/registered/unit/models/test_deepseek_v32_mixin.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, safety, and registered-test metadata checks. Raw output: reports/j-f0b2e1f03ee1/pre-commit-final.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f0b2e1f03ee1/venv/bin/python <GPU smoke script recorded in reports/j-f0b2e1f03ee1/v32-mixin-gpu.log>",
+      "exit_code": 0,
+      "what_was_measured": "The extracted empty pipeline top-k allocation preserves the assigned AMD MI350X device and produces int32 shape (0, 2048). This is a device-placement check, not a DeepSeek numerical accuracy claim."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Assigned AMD Instinct MI350X exercised by the extracted pipeline top-k allocation; reports/j-f0b2e1f03ee1/v32-mixin-gpu.log records device, dtype, and shape. No tensor arithmetic moved in this Python-only refactor, so an independent numerical reference was not applicable."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No DeepSeek-V3.2 model weights were available, so full model serving, semantic accuracy, distributed pipeline parallel execution, and real Indexer/IndexerKPool kernel output were not qualified.",
+    "NVIDIA, NPU, CPU, MUSA, and multi-GPU paths were not executed; their compatibility is covered only by preserving call signatures and hermetic policy tests.",
+    "The broader issue's proposed dedicated NPU and CPU hardware mixins and its optional further attention-method abstraction are not implemented here. Existing completed upstream refactors already cover MHA, MLA, backend routing, ROCm, weight loading, and utilities; this contribution addresses the checklist's remaining V3.2 extraction only.",
+    "No native source changed, repository-environment.json declares no prepared native rebuild target, and no native rebuild was performed."
+  ]
+}
