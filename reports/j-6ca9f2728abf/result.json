@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36536",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1239",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1202",
+  "candidate_commit": "87a8434d94c3f73626fdb66d00c73268f058e1d3",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base independently reproduced both reported LlamaForCausalLM startup crashes after GPU weight loading. The exact candidate rejects both auto-filled and explicit multi-layer EAGLE configurations during argument resolution with a clear ValueError, an outcome explicitly allowed by the original issue. Focused regression and boundary tests pass, and ordinary non-multi-layer Llama EAGLE behavior remains unchanged.",
+  "tests": [
+    {
+      "command": "python -m sglang.launch_server --model-path <private-tiny-llama> --skip-tokenizer-init --mem-fraction-static 0.01 --context-length 128 --max-total-tokens 256 --attention-backend triton --disable-cuda-graph --speculative-algorithm EAGLE --enable-multi-layer-eagle --port 38671 (recorded base)",
+      "exit_code": 137,
+      "what_was_measured": "The target loaded on gfx950 as LlamaForCausalLM, then startup reproduced the reported invariant assertion with draft tokens 8 and steps 5."
+    },
+    {
+      "command": "python -m sglang.launch_server --model-path <private-tiny-llama> --skip-tokenizer-init --mem-fraction-static 0.01 --context-length 128 --max-total-tokens 256 --attention-backend triton --disable-cuda-graph --speculative-algorithm EAGLE --enable-multi-layer-eagle --speculative-num-steps 5 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6 --port 38672 (recorded base)",
+      "exit_code": 137,
+      "what_was_measured": "The target loaded on gfx950, passed the invariant, then reproduced the reported unexpected draft_model_idx keyword passed to LlamaForCausalLM."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/server_args/test_server_args.py -k TestMultiLayerEagleArgs (exact candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Three candidate tests passed: early Llama rejection, unchanged ordinary Llama EAGLE auto-fill (5,4,8), and unchanged MiMoV2 embedded-MTP resolution (3,1,4)."
+    },
+    {
+      "command": "the two base launch commands repeated at exact candidate commit on ports 38673 and 38674",
+      "exit_code": 1,
+      "what_was_measured": "Both auto-fill and explicit-tuple paths raised the intended ValueError during argument resolution, with no weight-load marker, assertion, or constructor TypeError."
+    },
+    {
+      "command": "python -m pytest -q test/registered/unit/server_args/test_server_args.py (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "227 tests and 44 subtests passed; two unrelated context-parallel tests failed because the prepared HIP platform explicitly rejects prefill CP."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Both failing-before serving runs loaded the deterministic Llama weights on the assigned AMD Instinct MI350X gfx950 GPU before reaching the reported failures.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The review environment was AMD gfx950 with ROCm 7.2 and Torch 2.11.0, not the reporter's NVIDIA CUDA environment.",
+    "The deterministic two-layer random Llama fixture validates startup, argument resolution, GPU model loading, and constructor dispatch only; it does not validate TinyLlama semantic accuracy or full-model behavior.",
+    "No supported embedded-MTP checkpoint weights were available, so multi-layer EAGLE generation on such an architecture was not exercised; only its independent MiMoV2 configuration boundary was tested.",
+    "The full server-argument module has two unrelated existing failures on HIP where prefill context parallelism is intentionally rejected."
+  ]
+}
