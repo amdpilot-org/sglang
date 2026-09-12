@@ -69,6 +69,26 @@ from sglang.srt.utils import BumpAllocator, get_bool_env_var
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 
+
+def _require_attn_output_and_lse(attn_result):
+    """Validate the DCP decode attention contract before using its LSE."""
+    if (
+        not isinstance(attn_result, tuple)
+        or len(attn_result) < 2
+        or not isinstance(attn_result[1], torch.Tensor)
+    ):
+        result_desc = (
+            f"Tensor(shape={tuple(attn_result.shape)})"
+            if isinstance(attn_result, torch.Tensor)
+            else type(attn_result).__name__
+        )
+        raise RuntimeError(
+            "ROCm DCP decode requires the attention backend to return "
+            f"(attn_output, lse), but received {result_desc}"
+        )
+    return attn_result[0], attn_result[1]
+
+
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
 
@@ -749,19 +769,22 @@ class DeepseekMLARocmForwardMixin:
                     }
                 if is_dcp_mla_decode_phase(forward_batch):
                     # set return_lse=True to correct attn_output
-                    attn_output, lse = self.attn_mqa_for_dcp_decode(
-                        q_nope_out,
-                        k_nope,
-                        k_nope,
-                        forward_batch,
-                        q_rope=q_pe,
-                        k_rope=k_pe,
-                        **extra_args,
-                        **(
-                            dict(topk_indices=topk_indices)
-                            if topk_indices is not None
-                            else {}
-                        ),
+                    attn_output, lse = _require_attn_output_and_lse(
+                        self.attn_mqa_for_dcp_decode(
+                            q_nope_out,
+                            k_nope,
+                            k_nope,
+                            forward_batch,
+                            q_rope=q_pe,
+                            k_rope=k_pe,
+                            return_lse=True,
+                            **extra_args,
+                            **(
+                                dict(topk_indices=topk_indices)
+                                if topk_indices is not None
+                                else {}
+                            ),
+                        )
                     )
                 else:
                     attn_output = self.attn_mqa(
