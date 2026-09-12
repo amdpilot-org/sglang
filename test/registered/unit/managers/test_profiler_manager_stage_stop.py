@@ -10,7 +10,7 @@ from sglang.srt.managers.scheduler_components.profiler_manager import (
     SchedulerProfilerManager,
 )
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
-from sglang.srt.utils.profile_utils import _get_stage_from_forward_mode
+from sglang.srt.utils.profile_utils import _ProfilerTorch, _get_stage_from_forward_mode
 
 
 class TestProfilerManagerStageStop(unittest.TestCase):
@@ -87,9 +87,7 @@ class TestProfilerManagerStageStop(unittest.TestCase):
         manager = SchedulerProfilerManager.__new__(SchedulerProfilerManager)
         manager.profile_in_progress = True
         manager.torch_profiler = profiler
-        temp_dir = tempfile.TemporaryDirectory(
-            dir="/tmp/amdpilot-repo-j-12936fe13f1a"
-        )
+        temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         manager.torch_profiler_output_dir = Path(temp_dir.name)
         manager.profile_prefix = ""
@@ -110,7 +108,7 @@ class TestProfilerManagerStageStop(unittest.TestCase):
         manager.profiler_start_forward_ct = 1
         manager.detailed_annotations = False
 
-        with patch("torch.distributed.barrier"):
+        with patch("torch.distributed.barrier") as barrier:
             started = time.monotonic()
             manager._stop_profile(stage=ForwardMode.DECODE)
             elapsed = time.monotonic() - started
@@ -119,9 +117,52 @@ class TestProfilerManagerStageStop(unittest.TestCase):
             allow_export.set()
             manager._wait_for_pending_exports()
 
+        barrier.assert_not_called()
+
         profiler.stop.assert_called_once_with()
         profiler.export_chrome_trace.assert_called_once()
         self.assertFalse(manager.profile_in_progress)
+
+    def test_profile_v2_trace_export_does_not_block_stop(self):
+        export_started = threading.Event()
+        allow_export = threading.Event()
+
+        def export_trace(_path):
+            export_started.set()
+            self.assertTrue(allow_export.wait(timeout=5))
+
+        profiler = Mock()
+        profiler.export_chrome_trace.side_effect = export_trace
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = _ProfilerTorch.__new__(_ProfilerTorch)
+            profile.output_dir = temp_dir
+            profile.output_prefix = ""
+            profile.output_suffix = "-DECODE"
+            profile.profile_id = "test-v2"
+            profile.ps = SimpleNamespace(
+                tp_rank=0,
+                dp_size=1,
+                dp_rank=0,
+                pp_size=1,
+                pp_rank=0,
+                moe_ep_size=1,
+                moe_ep_rank=0,
+            )
+            profile.torch_profiler = profiler
+
+            with patch("torch.distributed.barrier") as barrier:
+                started = time.monotonic()
+                profile.stop()
+                elapsed = time.monotonic() - started
+                self.assertTrue(export_started.wait(timeout=1))
+                self.assertLess(elapsed, 0.5)
+                allow_export.set()
+                profile.export_thread.join(timeout=5)
+
+            barrier.assert_not_called()
+            self.assertFalse(profile.export_thread.is_alive())
+            profiler.stop.assert_called_once_with()
+            profiler.export_chrome_trace.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import glob
 import logging
 import os
 import threading
@@ -337,10 +338,32 @@ class SchedulerProfilerManager:
         merge_profiles: bool,
         output_dir: Path,
         profile_id: str,
+        stage_suffix: str,
+        expected_exports: int,
     ) -> None:
+        completion_pattern = None
         try:
             profiler.export_chrome_trace(trace_path)
-            torch.distributed.barrier(self.dp_tp_cpu_group)
+            if merge_profiles:
+                Path(trace_path + ".complete").touch()
+            is_merge_rank = (
+                self.ps.tp_rank == 0
+                and (self.ps.dp_size <= 1 or self.ps.dp_rank == 0)
+                and (self.ps.pp_size <= 1 or self.ps.pp_rank == 0)
+                and (self.ps.moe_ep_size <= 1 or self.ps.moe_ep_rank == 0)
+            )
+            if merge_profiles and is_merge_rank:
+                completion_pattern = str(
+                    output_dir
+                    / f"*{glob.escape(profile_id)}*{glob.escape(stage_suffix)}.trace.json.gz.complete"
+                )
+                deadline = time.monotonic() + 300
+                while len(glob.glob(completion_pattern)) < expected_exports:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"Timed out waiting for {expected_exports} profile exports"
+                        )
+                    time.sleep(0.1)
             merge_message = self._merge_profile_traces(
                 merge_profiles=merge_profiles,
                 output_dir=output_dir,
@@ -354,6 +377,9 @@ class SchedulerProfilerManager:
         except Exception:
             logger.exception("Failed to export profiler trace to %s", trace_path)
         finally:
+            if completion_pattern is not None:
+                for path in glob.glob(completion_pattern):
+                    Path(path).unlink(missing_ok=True)
             del profiler
             gc.collect()
 
@@ -401,6 +427,15 @@ class SchedulerProfilerManager:
                     + stage_suffix
                     + ".trace.json.gz"
                 )
+                completion_path = os.path.join(
+                    self.torch_profiler_output_dir, filename + ".complete"
+                )
+                Path(completion_path).unlink(missing_ok=True)
+                expected_exports = (
+                    torch.distributed.get_world_size(group=self.dp_tp_cpu_group)
+                    if torch.distributed.is_initialized()
+                    else 1
+                )
 
                 export_thread = threading.Thread(
                     target=self._export_torch_trace,
@@ -412,6 +447,8 @@ class SchedulerProfilerManager:
                         "merge_profiles": self.merge_profiles,
                         "output_dir": self.torch_profiler_output_dir,
                         "profile_id": self.profile_id,
+                        "stage_suffix": stage_suffix,
+                        "expected_exports": expected_exports,
                     },
                     name=f"sglang-profile-export-{self.profile_id}-{self.ps.tp_rank}",
                 )
