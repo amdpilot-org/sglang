@@ -1,0 +1,45 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35752",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Raised the prometheus-client minimum to 0.25.0 across all six package variants, enabled CollectorRegistry support for collectors without statically declared names, and added end-to-end assertions for repeated name[] filtering, unknown-name exclusion, and preservation of the unfiltered metrics payload. The defect was reproduced before the change and the fixed path was verified both through the actual ASGI middleware and a real one-GPU SGLang server.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/reproduce_metrics_filter.py (before change)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before regression: an actual multiprocess SGLang ASGI metrics app returned both requested families unfiltered but an empty body for the repeated name[] request. Raw output: /tmp/amdpilot-repo-j-5e3ffbb1e9dd/failing-before.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/reproduce_metrics_filter.py (after change)",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression: the same actual middleware returned both requested families and excluded the unrelated family. Raw output: /tmp/amdpilot-repo-j-5e3ffbb1e9dd/passing-after.log"
+    },
+    {
+      "command": "PYTHONPATH=<isolated prometheus-client 0.25.0 target>:/job/repo/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/reproduce_metrics_filter.py",
+      "exit_code": 0,
+      "what_was_measured": "Compatibility at the newly declared minimum version: full scrape populated, both repeated requested names present, unrelated metric absent. Raw output: /tmp/amdpilot-repo-j-5e3ffbb1e9dd/passing-prometheus-0.25.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python -m pre_commit run --files <all eight changed source/test/manifest files>",
+      "exit_code": 0,
+      "what_was_measured": "TOML validity, Python AST, formatting, lint, spelling, registered-test metadata, and repository policy checks all passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python -m pytest --collect-only -q test/registered/observability/test_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "The modified registered observability module imported successfully and all 10 tests, including the one-GPU metrics test containing the new assertions, collected."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/venv/bin/python /tmp/amdpilot-repo-j-5e3ffbb1e9dd/run_server_probe.py --fixture /tmp/amdpilot-repo-j-5e3ffbb1e9dd/tiny-random-llama --output /tmp/amdpilot-repo-j-5e3ffbb1e9dd/server-metrics-evidence",
+      "exit_code": 0,
+      "what_was_measured": "Real source-checkout ROCm server with --enable-metrics: full and repeated-name filtered scrapes returned 200; both requested families were present; unrelated and unknown families were absent from the filtered response; ordinary, OpenAI, batch, and streaming generation probes also returned 200. Evidence: /tmp/amdpilot-repo-j-5e3ffbb1e9dd/server-metrics-evidence/metrics.json, run-metadata.json, and server.log"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native source was changed, so a native rebuild and compiler/ISA validation were not applicable.",
+    "The checked-in Qwen/Qwen3-0.6B registered test was collected but not run with that external model. The same HTTP and multiprocess path was executed end-to-end with the qualified deterministic tiny Llama fixture; this does not claim semantic accuracy for any model.",
+    "The gRPC HTTP sidecar uses a separate aiohttp exposition implementation and is outside the source issue's make_asgi_app contract; this change does not add name[] filtering to that separate endpoint."
+  ]
+}

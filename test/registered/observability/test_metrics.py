@@ -160,10 +160,29 @@ class TestEnableMetrics(CustomTestCase):
 
             metrics = _parse_prometheus_metrics(metrics_text)
             self._verify_metrics_common(metrics_text, metrics, expect_mfu_metrics)
+            self._verify_metrics_query_filter(metrics)
             if verify_metrics_extra is not None:
                 verify_metrics_extra(metrics)
         finally:
             kill_process_tree(process.pid)
+
+    def _verify_metrics_query_filter(self, unfiltered_metrics):
+        requested_names = {
+            "sglang:num_running_reqs",
+            "sglang:prompt_tokens_total",
+        }
+        response = requests.get(
+            f"{DEFAULT_URL_FOR_TEST}/metrics",
+            params=[
+                *(("name[]", name) for name in sorted(requested_names)),
+                ("name[]", "sglang:does_not_exist"),
+            ],
+        )
+        self.assertEqual(response.status_code, 200)
+
+        filtered_metrics = _parse_prometheus_metrics(response.text)
+        self.assertEqual(set(filtered_metrics), requested_names)
+        self.assertTrue(set(filtered_metrics) < set(unfiltered_metrics))
 
     def _verify_metrics_common(self, metrics_text, metrics, expect_mfu_metrics: bool):
         essential_metrics = [
