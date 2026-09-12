@@ -1,0 +1,65 @@
+{
+  "job_id": "j-8d686f7d7fe8",
+  "status": "pass",
+  "qualification_scope": "Focused SGLang RMSNorm artifact-delivery workflow only; this does not qualify all repository behavior.",
+  "source_revision": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "source_path": "/job/repo/python/sglang/srt/layers/layernorm.py",
+  "prepared_interpreter": "/tmp/amdpilot-repo-j-8d686f7d7fe8/venv/bin/python",
+  "runtime": {
+    "torch": "2.11.0+rocm7.2",
+    "hip": "7.2.26015",
+    "torch_module": "/opt/venv/lib/python3.12/site-packages/torch/__init__.py",
+    "torch_native_extension": "/opt/venv/lib/python3.12/site-packages/torch/_C.cpython-312-x86_64-linux-gnu.so"
+  },
+  "gpu": {
+    "logical_index": 0,
+    "visible_device_count": 1,
+    "name": "AMD Instinct MI355X",
+    "architecture": "gfx950:sramecc+:xnack-",
+    "pci_bus_id": 21,
+    "uuid": "39313232-3263-3137-6630-663634386437",
+    "total_memory_bytes": 309220868096
+  },
+  "implementation": {
+    "class": "sglang.srt.layers.layernorm.RMSNorm",
+    "resolved_dispatch": "forward_hip",
+    "effective_path": "forward_hip -> forward_native",
+    "is_hip": true,
+    "use_aiter": false,
+    "has_vllm_rms_norm": false,
+    "note": "The prepared environment has no vllm module. SGLang's forward_hip therefore exercised its designed forward_native fallback on GPU; no dependency was installed and no native component was rebuilt."
+  },
+  "reference": {
+    "dtype": "float32",
+    "formula": "x.float() * rsqrt(mean(x.float() * x.float(), dim=-1, keepdim=True) + 1e-6) * weight.float()",
+    "independence": "Computed directly in the probe without calling torch.nn.functional.rms_norm or an SGLang RMSNorm method."
+  },
+  "commands": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8d686f7d7fe8/venv/bin/python reports/j-8d686f7d7fe8/probe_rmsnorm.py",
+      "working_directory": "/job/repo",
+      "exit_code": 1,
+      "raw_output": "reports/j-8d686f7d7fe8/initial_probe_failure.txt",
+      "purpose": "Initial import-path probe; observed that optional vllm is absent."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8d686f7d7fe8/venv/bin/python reports/j-8d686f7d7fe8/probe_rmsnorm.py",
+      "working_directory": "/job/repo",
+      "exit_code": 0,
+      "raw_output": "reports/j-8d686f7d7fe8/rmsnorm_probe.txt",
+      "purpose": "Actual one-GPU RMSNorm numerical qualification."
+    }
+  ],
+  "measurements": [
+    {"dtype": "float16", "shape": [7, 4096], "odd_hidden_width": false, "atol": 0.004, "rtol": 0.004, "max_absolute_error": 0.0025300979614257812, "max_relative_error": 0.0010675662197172642, "finite": true, "allclose": true},
+    {"dtype": "float16", "shape": [7, 4103], "odd_hidden_width": true, "atol": 0.004, "rtol": 0.004, "max_absolute_error": 0.0019478797912597656, "max_relative_error": 0.00048578018322587013, "finite": true, "allclose": true},
+    {"dtype": "bfloat16", "shape": [7, 4096], "odd_hidden_width": false, "atol": 0.025, "rtol": 0.01, "max_absolute_error": 0.01560354232788086, "max_relative_error": 0.00386565993539989, "finite": true, "allclose": true},
+    {"dtype": "bfloat16", "shape": [7, 4103], "odd_hidden_width": true, "atol": 0.025, "rtol": 0.01, "max_absolute_error": 0.015612125396728516, "max_relative_error": 0.0038878319319337606, "finite": true, "allclose": true}
+  ],
+  "limitations": [
+    "This is a focused RMSNorm qualification for two dtypes, two widths, one shape, one epsilon, and one assigned GPU, not a repository-wide validation.",
+    "The optional vllm ROCm custom operator is unavailable in the prepared environment, so the exercised default HIP route used SGLang's documented native Torch fallback.",
+    "No residual/fused-add, quantization, gradient, performance, multi-GPU, or distributed behavior was tested.",
+    "The recurring libtinfo loader warning was retained in raw output; it did not affect the successful probe."
+  ]
+}
