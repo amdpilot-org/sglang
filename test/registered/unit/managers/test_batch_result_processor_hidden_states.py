@@ -213,7 +213,10 @@ class TestPrefillHiddenStateOffsets(CustomTestCase):
     def test_pending_abort_wins_over_sampling_mask_overflow(self):
         self._assert_aborted_final_prefill(SamplingMaskStatus.OVERFLOW)
 
-    def _assert_aborted_final_prefill(self, sampling_status=None):
+    def test_pending_abort_wins_over_beam_prefill_commit(self):
+        self._assert_aborted_final_prefill(beam_group=object())
+
+    def _assert_aborted_final_prefill(self, sampling_status=None, beam_group=None):
         aborted = _PrefillReq(
             rid="aborted",
             inflight_middle_chunks=0,
@@ -222,6 +225,7 @@ class TestPrefillHiddenStateOffsets(CustomTestCase):
             to_finish=object(),
         )
         abort_reason = aborted.to_finish
+        aborted.beam_group = beam_group
         aborted.return_sampling_mask = sampling_status is not None
         live = _PrefillReq(
             rid="live",
@@ -238,6 +242,7 @@ class TestPrefillHiddenStateOffsets(CustomTestCase):
             spec_info=None,
             prefill_stats=None,
             dp_cooperation_info=None,
+            forward_iter=7,
         )
         logits_output = SimpleNamespace(
             sampling_mask_output=None,
@@ -311,6 +316,8 @@ class TestPrefillHiddenStateOffsets(CustomTestCase):
             3,
             logits_output,
         )
+        if beam_group is not None:
+            processor.beam_coordinator.commit_prefill.assert_not_called()
 
 
 class TestPrefillSkippedOutput(CustomTestCase):

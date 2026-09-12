@@ -356,17 +356,19 @@ class SchedulerBatchResultProcessor:
                     if sampling_mask_finish_reason is not None:
                         req.to_finish = sampling_mask_finish_reason
                         req.update_finish_state(0)
+                    elif drop_prefill_result:
+                        # Abort won the race with this delayed prefill result.
+                        # Finish and clean up without committing the sampled token
+                        # or any metadata derived from it. This must precede the
+                        # beam relay: a cancelled beam request must not mutate the
+                        # beam group after its final prefill has completed.
+                        req.update_finish_state(new_accepted_len=0)
                     elif req.beam_group is not None:
                         # The relay point already replaced the sampled-token
                         # append; the group owns all finish semantics.
                         self.beam_coordinator.commit_prefill(
                             req, up_to_tick=batch.forward_iter
                         )
-                    elif drop_prefill_result:
-                        # Abort won the race with this delayed prefill result.
-                        # Finish and clean up without committing the sampled token
-                        # or any metadata derived from it.
-                        req.update_finish_state(new_accepted_len=0)
                     else:
                         # req output_ids are set here
                         req.output_ids.append(next_token_id)
