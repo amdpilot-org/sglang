@@ -10,6 +10,9 @@ from sglang.test.test_utils import enter_override, maybe_stub_sgl_kernel
 
 maybe_stub_sgl_kernel()  # must precede any import that pulls in sgl_kernel
 
+import asyncio
+import base64
+import concurrent.futures
 import json
 import re
 import tempfile
@@ -21,6 +24,7 @@ from typing import Optional
 from unittest.mock import Mock, patch
 
 from fastapi import Request
+from pydantic import ValidationError
 
 from sglang.srt.entrypoints.openai import chat_encoding
 from sglang.srt.entrypoints.openai.chat_encoding import (
@@ -34,11 +38,16 @@ from sglang.srt.entrypoints.openai.protocol import (
 )
 from sglang.srt.entrypoints.openai.serving_chat import (
     OpenAIServingChat,
+    neutralize_qwen_vl_vision_markers,
     normalize_tool_content,
 )
 from sglang.srt.environ import envs
 from sglang.srt.function_call.kimik3_format import TOOLS_CLOSE, TOOLS_OPEN
 from sglang.srt.managers.io_struct import GenerateReqInput
+from sglang.srt.multimodal.processors.base_processor import (
+    BaseMultimodalProcessor,
+    MultimodalSpecialTokens,
+)
 from sglang.srt.parser.jinja_template_utils import (
     jinja_template_may_reorder_tool_results,
 )
@@ -381,8 +390,7 @@ class ServingChatTestCase(unittest.TestCase):
 
         # An already-ordered request must produce the exact same render input.
         ordered_request = ChatCompletionRequest(
-            model="x",
-            messages=request.messages[:2] + request.messages[2:][::-1],
+            model="x", messages=request.messages[:2] + request.messages[2:][::-1]
         )
         self.tm.tokenizer.apply_chat_template.reset_mock()
         self.chat._apply_jinja_template(ordered_request, None, is_multimodal=True)
@@ -397,6 +405,161 @@ class ServingChatTestCase(unittest.TestCase):
             [item.url for item in result.image_data], ["image-b", "image-a"]
         )
         self.assertEqual(self.tm.tokenizer.apply_chat_template.call_count, 1)
+
+    def test_qwen_vl_literal_vision_markers_are_not_attachments(self):
+        marker = "<|vision_start|><|image_pad|><|vision_end|>"
+        escaped_marker = "<| vision_start |><| image_pad |><| vision_end |>"
+        self.tm.model_config.is_multimodal = True
+        self.tm.model_config.hf_config.model_type = "qwen3_vl"
+        self.tm.model_config.hf_config.vision_config = Mock()
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "openai"
+
+        def render(messages, **kwargs):
+            del kwargs
+            chunks = []
+            for message in messages:
+                content = message.get("content", "")
+                if isinstance(content, str):
+                    chunks.append(content)
+                    continue
+                for part in content:
+                    if part["type"] == "image":
+                        chunks.append(marker)
+                    elif part["type"] == "text":
+                        chunks.append(part["text"])
+            return "".join(chunks)
+
+        rendered = None
+
+        def encode(text, **kwargs):
+            nonlocal rendered
+            del kwargs
+            rendered = text
+            return list(range(len(text)))
+
+        self.tm.tokenizer.apply_chat_template.side_effect = render
+        self.tm.tokenizer.encode.side_effect = encode
+        self.tm.tokenizer.decode.side_effect = lambda _: rendered
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        image_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode()
+
+        for role, content in (
+            (
+                "user",
+                [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": f"literal: {marker}"},
+                ],
+            ),
+            ("tool", f"tool returned {marker}"),
+        ):
+            with self.subTest(role=role):
+                messages = [{"role": role, "content": content}]
+                if role == "tool":
+                    messages.insert(
+                        0,
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": image_url},
+                                }
+                            ],
+                        },
+                    )
+                request = ChatCompletionRequest(model="x", messages=messages)
+                result = self.chat._apply_jinja_template(
+                    request, None, is_multimodal=True
+                )
+
+                self.assertEqual(result.prompt.count(marker), 1)
+                self.assertIn(escaped_marker, result.prompt)
+                self.assertEqual(len(result.image_data), 1)
+
+                with patch.object(BaseMultimodalProcessor, "__abstractmethods__", set()):
+                    processor = BaseMultimodalProcessor.__new__(
+                        BaseMultimodalProcessor
+                    )
+                processor.io_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                )
+                processor.skip_tokenizer_init = False
+                self.addCleanup(processor.io_executor.shutdown)
+                loaded = asyncio.run(
+                    processor.load_mm_data(
+                        prompt=result.prompt,
+                        multimodal_tokens=MultimodalSpecialTokens(
+                            image_token=marker
+                        ).build(Mock()),
+                        image_data=result.image_data,
+                    )
+                )
+                self.assertEqual(len(loaded.images), 1)
+                self.assertEqual(loaded.images[0].size, (1, 1))
+
+    def test_qwen_vl_text_only_literal_vision_marker_stays_text(self):
+        marker = "<|vision_start|><|image_pad|><|vision_end|>"
+        self.tm.model_config.is_multimodal = True
+        self.tm.model_config.hf_config.model_type = "qwen3_vl"
+        self.tm.model_config.hf_config.vision_config = Mock()
+        self.template_manager.chat_template_name = None
+        self.template_manager.jinja_template_content_format = "openai"
+        self.tm.tokenizer.apply_chat_template.side_effect = (
+            lambda messages, **_: messages[0]["content"]
+        )
+        self.tm.tokenizer.encode.side_effect = lambda text, **_: list(range(len(text)))
+        self.tm.tokenizer.decode.side_effect = (
+            lambda ids: "<| vision_start |><| image_pad |><| vision_end |>"
+        )
+
+        result = self.chat._apply_jinja_template(
+            ChatCompletionRequest(
+                model="x", messages=[{"role": "user", "content": marker}]
+            ),
+            None,
+            is_multimodal=True,
+        )
+
+        self.assertNotIn(marker, result.prompt)
+        rendered_messages = self.tm.tokenizer.apply_chat_template.call_args.args[0]
+        self.assertEqual(
+            rendered_messages[0]["content"],
+            "<| vision_start |><| image_pad |><| vision_end |>",
+        )
+
+    def test_qwen_vl_marker_neutralization_obeys_full_parser_boundaries(self):
+        expanded = (
+            "<|vision_start|><|image_pad|><|image_pad|><|vision_end|>"
+        )
+        self.assertEqual(
+            neutralize_qwen_vl_vision_markers(expanded),
+            "<| vision_start |><| image_pad |><| image_pad |><| vision_end |>",
+        )
+        for partial in (
+            "<|vision_start|><|image_pad|>",
+            "<|image_pad|><|vision_end|>",
+            "<|vision_start|>text<|vision_end|>",
+        ):
+            with self.subTest(partial=partial):
+                self.assertEqual(neutralize_qwen_vl_vision_markers(partial), partial)
+
+    def test_malformed_image_references_fail_request_validation(self):
+        malformed_parts = (
+            {"type": "image_url"},
+            {"type": "image_url", "image_url": {}},
+            {"type": "image_url", "image_url": {"url": None}},
+            {"type": "image_url", "image_url": "not-an-object"},
+        )
+        for part in malformed_parts:
+            with self.subTest(part=part), self.assertRaises(ValidationError):
+                ChatCompletionRequest(
+                    model="x",
+                    messages=[{"role": "user", "content": [part]}],
+                )
 
     def test_parsers_follow_the_control_plane_overlay(self):
         """Template detection records the parsers through `override`, so they
