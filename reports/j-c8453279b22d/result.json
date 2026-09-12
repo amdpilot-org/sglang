@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34737",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved candidate PR 1565's receiver refresh, generation-safe cleanup, and locked broadcast snapshot, then corrected failure matching so a subscriber whose key concatenates multiple connection_pool CP groups is removed when its prefill node fails.",
+  "tests": [
+    {
+      "command": "git switch --detach 1065fe89c32aa4918bac5d64a38c54a1f931076b && PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c8453279b22d/venv/bin/python <review adversarial_candidate.py>",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, multi_cp_remaining=1 and stale_broadcast_calls=1, while the single-CP control had single_cp_remaining=0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c8453279b22d/venv/bin/python <corrected adversarial_candidate.py>",
+      "exit_code": 0,
+      "what_was_measured": "After correction, multi_cp_remaining=0, stale_broadcast_calls=0, and single_cp_remaining=0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c8453279b22d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestNixlNodeFailure::test_handle_node_failure_removes_multi_cp_watermark_subscriber test/registered/unit/disaggregation/test_nixl_backend_basic.py::TestStagingWatermarkSubscriberLifecycle",
+      "exit_code": 0,
+      "what_was_measured": "Five focused lifecycle tests passed, covering single- and multi-CP failure cleanup, receiver refresh, generation races, and healthy-subscriber selectivity."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c8453279b22d/venv/bin/python -m pytest -q test/registered/unit/disaggregation/test_nixl_backend_basic.py test/registered/unit/disaggregation/test_disaggregation_wire.py",
+      "exit_code": 0,
+      "what_was_measured": "91 relevant tests and 14 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c8453279b22d/venv/bin/python -m pre_commit run --files python/sglang/srt/disaggregation/common/conn.py python/sglang/srt/disaggregation/common/staging_handler.py test/registered/unit/disaggregation/test_disaggregation_wire.py test/registered/unit/disaggregation/test_nixl_backend_basic.py reports/j-c8453279b22d/result.json",
+      "exit_code": 0,
+      "what_was_measured": "All applicable formatting, lint, syntax, and registered-test policy hooks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are in the shared Python staging control plane; no GPU kernels or model execution were used."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported heterogeneous-TP topology requires at least three GPUs and multiple serving processes; only one gfx950 GPU was assigned, so no full distributed serving reproduction is claimed.",
+    "No model weights were needed or used; validation is deterministic control-plane coverage rather than model semantic validation."
+  ]
+}
