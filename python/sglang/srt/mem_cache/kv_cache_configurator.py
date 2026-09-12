@@ -379,6 +379,11 @@ class KVCacheConfigurator:
     def pool_page_size(self) -> int:
         return get_schedule().page_size * self.loc_space_scale
 
+    def _dsa_index_buf_size(self, size: int) -> Optional[int]:
+        """Size replicated index-K storage for the allocator's loc space."""
+        scale = get_parallel().attn_dcp_size // self.loc_space_scale
+        return size * scale if scale > 1 else None
+
     def _derive_pool_sizes(self, *, config: MemoryPoolConfig) -> _PoolSizes:
         max_total_num_tokens = config.max_total_num_tokens
         max_running_requests = config.max_running_requests
@@ -1619,6 +1624,9 @@ class KVCacheConfigurator:
                     self.layer_info.start_layer, self.layer_info.end_layer
                 )
             ]
+        index_buf_size = self._dsa_index_buf_size(max_total_num_tokens)
+        if index_buf_size is not None:
+            pool_kwargs["index_buf_size"] = index_buf_size
         token_to_kv_pool = PoolCls(
             max_total_num_tokens,
             page_size=self.pool_page_size,
@@ -1859,6 +1867,7 @@ class KVCacheConfigurator:
                     index_kpool_compress=get_dsa_index_kpool_compress(
                         self.model_config.hf_config
                     ),
+                    index_buf_size=self._dsa_index_buf_size(max_total_num_tokens),
                     skip_topk_layers=(
                         None
                         if self.is_draft_worker
