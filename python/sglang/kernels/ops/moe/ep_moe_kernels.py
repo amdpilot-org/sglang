@@ -1035,7 +1035,12 @@ def _fwd_kernel_ep_scatter_1(
     cumsum = tl.cumsum(tokens_per_expert) - tokens_per_expert
     tl.store(expert_start_loc + offset_cumsum, cumsum, mask=offset_cumsum < num_experts)
 
-    cur_expert_start = tl.load(expert_start_loc + cur_expert)
+    # Keep the offset in registers instead of reloading the prefix that this
+    # program just stored. The masked prefix stores are issued by only part of
+    # the CTA, so a reload by every lane would require an explicit CTA barrier.
+    cur_expert_start = tl.sum(
+        tl.where(offset_cumsum < cur_expert, tokens_per_expert, 0), axis=0
+    )
     cur_expert_padded_token_num = tl.load(num_recv_tokens_per_expert + cur_expert)
     cur_expert_valid_token_num = tl.load(num_valid_tokens_per_expert + cur_expert)
 

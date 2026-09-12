@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31929",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The checked-out kernel still wrote expert_start_loc with a masked subset of lanes and immediately reloaded it without a CTA barrier. gfx950 compiler output preserved that store/reload dependency. The kernel now derives each expert offset from the already-loaded token counts, eliminating the unsynchronized global-memory communication. A regression rejects reintroducing the reload and GPU reference tests cover empty experts, padding, multiple block sizes, and non-power-of-two expert counts.",
+  "tests": [
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-a22f70b60735/triton-cache python -m pytest -q test/registered/kernels/ops/moe/test_ep_scatter.py::test_ep_scatter_prefix_is_not_reloaded (with the original source restored temporarily)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: detected tl.load(expert_start_loc + cur_expert) after the prefix store. Raw output: /tmp/amdpilot-repo-j-a22f70b60735/evidence/pytest_ep_scatter_before.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-a22f70b60735/triton-cache python -m pytest -q test/registered/kernels/ops/moe/test_ep_scatter.py",
+      "exit_code": 0,
+      "what_was_measured": "Five passing regression/reference cases on gfx950: no prefix reload plus exact prefix and m_indices results for zero counts, partially valid padded blocks, block sizes 32/64/128, and 1/3/5/17 experts. Raw output: /tmp/amdpilot-repo-j-a22f70b60735/evidence/pytest_ep_scatter_after.txt"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 TRITON_CACHE_DIR=/tmp/amdpilot-repo-j-a22f70b60735/triton-cache-post python <post-fix stress/compiler probe>",
+      "exit_code": 0,
+      "what_was_measured": "200 guarded GPU launches matched an independent PyTorch prefix/index reference with zero failures; generated TTIR contained no cur_expert_start reload. Raw output and compiler artifacts: /tmp/amdpilot-repo-j-a22f70b60735/evidence/postfix_probe.txt and postfix_kernel.{ttir,ttgir,llir,amdgcn}."
+    },
+    {
+      "command": "python -m pre_commit run --files python/sglang/kernels/ops/moe/ep_moe_kernels.py test/registered/kernels/ops/moe/test_ep_scatter.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, and registered-test metadata checks passed. Raw output: /tmp/amdpilot-repo-j-a22f70b60735/evidence/pre_commit.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported intermittent numerical/illegal-access symptom did not occur in 200 guarded launches on gfx950, although the compiler output confirmed the unsafe store/reload dependency.",
+    "The reporter used an NVIDIA H20 with CUDA/PTX; no NVIDIA GPU was assigned, so the exact PTX and H20 scheduling behavior were not reproduced.",
+    "No model weights or multi-node DeepEP environment were available, so the reported end-to-end CPU recv timeout path was not reproduced. The focused test validates only this Triton kernel's prefix/index output and compiler dataflow.",
+    "No native C++ or FlyDSL source changed, so no native rebuild was applicable."
+  ]
+}
