@@ -1,0 +1,267 @@
+FFF....F                                                   [100%]
+=================================== FAILURES ===================================
+__ TestEngineInfoBootstrapServer.test_metadata_is_kept_for_each_pipeline_rank __
+
+self = <test_engine_info_bootstrap_server.TestEngineInfoBootstrapServer testMethod=test_metadata_is_kept_for_each_pipeline_rank>
+
+    def test_metadata_is_kept_for_each_pipeline_rank(self):
+        # TP1/PP2 maps the two stages to world ranks 0 and 1, even though both
+        # stages have tp_rank=0.
+>       self._register(0, "pp0-session", "model.layers.0.weight")
+
+test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py:64:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py:50: in _register
+    response.raise_for_status()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Response [400]>
+
+    def raise_for_status(self) -> None:
+        """Raises :class:`HTTPError`, if one occurred."""
+
+        http_error_msg = ""
+        if isinstance(self.reason, bytes):
+            # We attempt to decode utf-8 first because some servers
+            # choose to localize their reason strings. If the string
+            # isn't utf-8, we fall back to iso-8859-1 for all other
+            # encodings. (See PR #3538)
+            try:
+                reason = self.reason.decode("utf-8")
+            except UnicodeDecodeError:
+                reason = self.reason.decode("iso-8859-1")
+        else:
+            reason = self.reason
+
+        if 400 <= self.status_code < 500:
+            http_error_msg = (
+                f"{self.status_code} Client Error: {reason} for url: {self.url}"
+            )
+
+        elif 500 <= self.status_code < 600:
+            http_error_msg = (
+                f"{self.status_code} Server Error: {reason} for url: {self.url}"
+            )
+
+        if http_error_msg:
+>           raise HTTPError(http_error_msg, response=self)
+E           requests.exceptions.HTTPError: 400 Client Error: Bad Request for url: http://127.0.0.1:36399/register_transfer_engine_info
+
+/opt/venv/lib/python3.12/site-packages/requests/models.py:1167: HTTPError
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.entrypoints.engine_info_bootstrap_server:engine_info_bootstrap_server.py:71 Failed to register engine info: 'tp_rank'
+_ TestEngineInfoBootstrapServer.test_nonzero_tp_and_pp_world_rank_is_preserved _
+
+self = <test_engine_info_bootstrap_server.TestEngineInfoBootstrapServer testMethod=test_nonzero_tp_and_pp_world_rank_is_preserved>
+
+    def test_nonzero_tp_and_pp_world_rank_is_preserved(self):
+        # TP4, pp_rank=2, tp_rank=1 maps to world rank 9.
+>       self._register(9, "pp2-tp1-session", "model.layers.20.weight")
+
+test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py:78:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py:50: in _register
+    response.raise_for_status()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Response [400]>
+
+    def raise_for_status(self) -> None:
+        """Raises :class:`HTTPError`, if one occurred."""
+
+        http_error_msg = ""
+        if isinstance(self.reason, bytes):
+            # We attempt to decode utf-8 first because some servers
+            # choose to localize their reason strings. If the string
+            # isn't utf-8, we fall back to iso-8859-1 for all other
+            # encodings. (See PR #3538)
+            try:
+                reason = self.reason.decode("utf-8")
+            except UnicodeDecodeError:
+                reason = self.reason.decode("iso-8859-1")
+        else:
+            reason = self.reason
+
+        if 400 <= self.status_code < 500:
+            http_error_msg = (
+                f"{self.status_code} Client Error: {reason} for url: {self.url}"
+            )
+
+        elif 500 <= self.status_code < 600:
+            http_error_msg = (
+                f"{self.status_code} Server Error: {reason} for url: {self.url}"
+            )
+
+        if http_error_msg:
+>           raise HTTPError(http_error_msg, response=self)
+E           requests.exceptions.HTTPError: 400 Client Error: Bad Request for url: http://127.0.0.1:34415/register_transfer_engine_info
+
+/opt/venv/lib/python3.12/site-packages/requests/models.py:1167: HTTPError
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.entrypoints.engine_info_bootstrap_server:engine_info_bootstrap_server.py:71 Failed to register engine info: 'tp_rank'
+__ TestRemoteInstanceWeightTransporter.test_registration_publishes_world_rank __
+
+self = <test_remote_instance_weight_transporter.TestRemoteInstanceWeightTransporter testMethod=test_registration_publishes_world_rank>
+
+    def test_registration_publishes_world_rank(self):
+        response = SimpleNamespace(status_code=200, text="OK")
+        with (
+            patch.object(
+                transporter_module,
+                "get_parallel",
+                return_value=SimpleNamespace(dist_init_addr=None),
+            ),
+            patch.object(
+                transporter_module,
+                "get_model",
+                return_value=SimpleNamespace(engine_info_bootstrap_port=12345),
+            ),
+            patch("requests.put", return_value=response) as put,
+        ):
+>           transporter = RemoteInstanceWeightTransporter(
+                get_model=lambda: None,
+                rank=3,
+                gpu_id=0,
+                session_id="pp1-tp1-session",
+                weight_info={"model.weight": (1, 2, 4)},
+            )
+E           TypeError: RemoteInstanceWeightTransporter.__init__() got an unexpected keyword argument 'rank'
+
+test/registered/unit/model_executor/model_runner_components/test_remote_instance_weight_transporter.py:32: TypeError
+_ TestRemoteInstanceTransferEngineRank.test_transfer_engine_queries_metadata_by_world_rank _
+
+self = <test_remote_instance_loader.TestRemoteInstanceTransferEngineRank testMethod=test_transfer_engine_queries_metadata_by_world_rank>
+
+    def test_transfer_engine_queries_metadata_by_world_rank(self):
+        loader = loader_mod.RemoteInstanceModelLoader(
+            _load_config(RemoteInstanceWeightLoaderBackend.TRANSFER_ENGINE)
+        )
+        model = MagicMock()
+        model.named_parameters.return_value = []
+        transfer_engine = MagicMock()
+        transfer_engine.batch_transfer_sync_read.return_value = 0
+
+>       with (
+            patch.object(loader_mod, "get_world_rank", return_value=3),
+            patch.object(
+                loader_mod,
+                "get_remote_instance_transfer_engine_info_per_rank",
+                return_value=("seed-session", {}),
+            ) as get_remote_info,
+            patch.object(loader_mod, "_post_load_weights"),
+        ):
+
+test/registered/unit/model_loader/test_remote_instance_loader.py:87:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/unittest/mock.py:1458: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <unittest.mock._patch object at 0x7fa03a92ec90>
+
+    def get_original(self):
+        target = self.getter()
+        name = self.attribute
+
+        original = DEFAULT
+        local = False
+
+        try:
+            original = target.__dict__[name]
+        except (AttributeError, KeyError):
+            original = getattr(target, name, DEFAULT)
+        else:
+            local = True
+
+        if name in _builtins and isinstance(target, ModuleType):
+            self.create = True
+
+        if not self.create and original is DEFAULT:
+>           raise AttributeError(
+                "%s does not have the attribute %r" % (target, name)
+            )
+E           AttributeError: <module 'sglang.srt.model_loader.loader' from '/job/repo/python/sglang/srt/model_loader/loader.py'> does not have the attribute 'get_world_rank'
+
+/usr/lib/python3.12/unittest/mock.py:1431: AttributeError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7fa03a8c7ce0>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7fa91c776ac0>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stdout call -----------------------------
+[CI Test Method] TestRemoteInstanceTransferEngineRank.test_transfer_engine_queries_metadata_by_world_rank
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/unit/model_loader/test_remote_instance_loader.py", line 87, in test_transfer_engine_queries_metadata_by_world_rank
+    with (
+  File "/usr/lib/python3.12/unittest/mock.py", line 1458, in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1431, in get_original
+    raise AttributeError(
+AttributeError: <module 'sglang.srt.model_loader.loader' from '/job/repo/python/sglang/srt/model_loader/loader.py'> does not have the attribute 'get_world_rank'
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py::TestEngineInfoBootstrapServer::test_metadata_is_kept_for_each_pipeline_rank
+FAILED test/registered/unit/entrypoints/test_engine_info_bootstrap_server.py::TestEngineInfoBootstrapServer::test_nonzero_tp_and_pp_world_rank_is_preserved
+FAILED test/registered/unit/model_executor/model_runner_components/test_remote_instance_weight_transporter.py::TestRemoteInstanceWeightTransporter::test_registration_publishes_world_rank
+FAILED test/registered/unit/model_loader/test_remote_instance_loader.py::TestRemoteInstanceTransferEngineRank::test_transfer_engine_queries_metadata_by_world_rank
+4 failed, 4 passed, 17 warnings, 14 subtests passed in 27.00s
