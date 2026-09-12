@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1932",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved PR 3235's valid exact-request Qwen image preprocessing optimization, but independently reproduced PR 3277's four counterexamples. The candidate does not implement prompt-independent explicit save/load, cross-worker or restart persistence, or Qwen video/audio caching; no speculative architecture change is claimed without Qwen-VL weights.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f0b2f6628d2a/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate's trusted-ID hit, single-flight cold miss, key scoping, bypass, and defensive-copy regression coverage; 4 tests passed."
+    },
+    {
+      "command": "PYTHONUNBUFFERED=1 timeout 60 /tmp/amdpilot-repo-j-f0b2f6628d2a/venv/bin/python reports/j-f0b2f6628d2a/adversarial.py",
+      "exit_code": 0,
+      "what_was_measured": "Same content ID with changed prompt produced unequal keys and two preprocessing calls; a fresh processor recomputed once; video and audio cache keys were None."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f0b2f6628d2a/venv/bin/python -m pytest -q test/registered/unit/multimodal/test_qwen_preprocess_request_cache.py test/registered/unit/multimodal/test_media_artifact_processor.py test/registered/unit/multimodal/test_preprocess_cache.py test/registered/unit/managers/test_mm_hashes.py test/registered/unit/parser/test_jinja_template_utils.py test/registered/unit/entrypoints/openai/test_protocol.py",
+      "exit_code": 0,
+      "what_was_measured": "Focused cache, identity, parser, and OpenAI protocol compatibility; 115 tests and 30 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f0b2f6628d2a/venv/bin/python -m compileall -q python/sglang/srt/multimodal/processors/qwen_vl.py",
+      "exit_code": 0,
+      "what_was_measured": "Modified Qwen processor source compiled successfully."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Patch whitespace integrity."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The rendered prompt remains part of the Qwen request preprocessing cache key, so the same image ID is reprocessed for a changed prompt.",
+    "The OpenAI-compatible API has no explicit preprocessing save operation and later caller-selected load operation.",
+    "Cache ownership remains local to each processor/tokenizer-worker process and entries do not survive restart.",
+    "Qwen video and audio requests bypass this cache path.",
+    "An AMD Instinct MI350X gfx950 was visible, but GPU execution was not used: no qualifying Qwen-VL model weights were available, and the tiny Llama fixture cannot validate Qwen preprocessing or cache semantics.",
+    "Qwen-VL end-to-end correctness, semantic equivalence, and performance were not validated because model weights were unavailable."
+  ]
+}
