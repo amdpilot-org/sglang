@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33740",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1784",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1749",
+  "candidate_commit": "bed37704472eae98455502c1b03037640481407c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The candidate fixes the benchmark-side readiness race described by the issue. On the recorded base, a controlled PD-router double returning 200 from /v1/models while returning 503 from /health_generate caused bench_serving to declare readiness immediately and continue into model setup. At the exact candidate commit, the identical CLI polled /health_generate and stopped only after the configured readiness timeout. The actual PD router implementation makes /health_generate depend on successful generation-health probes to both a selected prefill and decode worker, so this endpoint represents the required end-to-end readiness contract. This is a source fix with regression coverage, not test-only hardening.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-61363555c591/venv/bin/python -m sglang.bench_serving --backend sglang --base-url http://127.0.0.1:18765 --dataset-name random --num-prompts 1 --random-input 4 --random-output 1 --ready-check-timeout-sec 1 (recorded base; controlled HTTP double)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before behavior: requests were /v1/models, /v1/models, and /model_info; readiness succeeded at once despite /health_generate being configured to return 503, and execution advanced into tokenizer/model setup. See raw/base-cli.log and raw/base-http-paths.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-61363555c591/venv/bin/python -m sglang.bench_serving --backend sglang --base-url http://127.0.0.1:18765 --dataset-name random --num-prompts 1 --random-input 4 --random-output 1 --ready-check-timeout-sec 1 (candidate bed37704472eae98455502c1b03037640481407c; same HTTP double)",
+      "exit_code": 1,
+      "what_was_measured": "Passing-after contract: the only requests were two /health_generate probes; the CLI did not advance to model discovery and exited with the intended readiness-timeout message. See raw/candidate-cli.log and raw/candidate-http-paths.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-61363555c591/venv/bin/python -m pytest -q test/registered/bench_fn/test_benchmark_datasets_api.py -k TestBenchmarkReadinessEndpoint",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and backend boundary matrix: 2 passed, 10 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-61363555c591/venv/bin/python -m pytest -q test/registered/bench_fn/test_benchmark_datasets_api.py",
+      "exit_code": 0,
+      "what_was_measured": "Containing benchmark/dataset suite: 47 passed, 16 subtests passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed change and reproduced defect are HTTP readiness selection in Python. The assigned gfx950 was not used because GPU numerics do not qualify this control-plane contract."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The reported GLM-5.2-FP8 weights and two H200x8 nodes were unavailable; the full CUDA TP8 multi-node Mooncake workload was not reproduced.",
+    "The available single gfx950 ROCm 7.2 system cannot qualify H200/CUDA behavior, model semantic accuracy, or multi-node transport behavior.",
+    "The deterministic router double validates the reported readiness ordering and the real PD router source validates the endpoint semantics; it is not a full-model serving run."
+  ]
+}
