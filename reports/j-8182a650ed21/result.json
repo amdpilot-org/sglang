@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38448",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the base source ordering in which ready_to_load_host_cache hands over the HiCache burst before prepare_for_extend and the remaining round-head uploads. Moved the hand-over to run_batch after final batch formation, pre-uploaded forward inputs and metadata before the burst event, and consumed staged tensors once with source-identity guards. The correction matches open upstream PR https://github.com/sgl-project/sglang/pull/38449 and was independently validated on the prepared base.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-8182a650ed21/venv/bin/python -m pytest -q test/registered/unit/managers/test_head_upload_ordering.py (before source changes)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression collection proved the required staging/order API was absent; source inspection recorded ready_to_load_host_cache before prepare_for_extend."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8182a650ed21/venv/bin/python -m pytest -q test/registered/unit/managers/test_head_upload_ordering.py",
+      "exit_code": 0,
+      "what_was_measured": "21 issue-specific ordering and boundary cases: pre-upload-before-hand-over, pure and mixed prefill, speculative and DP metadata behavior, one-shot identity-guarded consumption, cache-disabled and non-extend gating, idempotent re-entry, and merge invalidation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-8182a650ed21/venv/bin/python -m pytest -q test/registered/unit/managers/test_head_upload_ordering.py test/registered/unit/model_executor/test_mlp_sync_pad_unpad.py test/registered/unit/managers/test_generation_auxiliary_output.py",
+      "exit_code": 0,
+      "what_was_measured": "56 focused scheduler, DP MLP-sync, auxiliary-output, and issue regression tests passed."
+    },
+    {
+      "command": "prepared Python inline torch.cuda pinned-H2D StagedDeviceTensor check",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, copied [3,5,8] from pinned host memory and verified one-shot consumption and source-identity rejection."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the proposed patch."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "A real pinned nonblocking H2D staging and consumption check passed on the assigned AMD Instinct MI355X (gfx950:sramecc+:xnack-)."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": "The reported timing-dependent production symptom was observed upstream on 8x H100 TP=8 with multi-GiB host-cache bursts. This job had one gfx950 GPU and no qualifying large model weights/workload, so it did not reproduce or profile the H100 copy-engine arbitration, TP all-reduce delay, multi-GiB HiCache burst, or end-to-end performance change. The GPU check validates staging mechanics only; deterministic unit tests validate the stream-enqueue call order. No native C++ code changed."
+}
