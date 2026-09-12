@@ -22,6 +22,8 @@ from sglang.srt.layers.attention.base_attn_backend import (
     SharedReadEnds,
 )
 from sglang.srt.layers.attention.mamba.mamba import MambaMixer2
+from sglang.srt.layers.attention.mamba.mamba1 import MambaMixer1
+from sglang.srt.layers.attention.mamba.mamba1_metadata import Mamba1Metadata
 from sglang.srt.layers.attention.mamba.mamba2_metadata import (
     ForwardMetadata,
     Mamba2Metadata,
@@ -952,6 +954,50 @@ class MambaAttnBackendBase(AttentionBackend):
                 ssm_states[forward_metadata.track_ssm_final_dst] = ssm_states[
                     forward_metadata.track_ssm_final_src
                 ]
+
+
+class Mamba1AttnBackend(MambaAttnBackendBase):
+    """State/cache adapter for hybrid Mamba-1 models such as Jamba."""
+
+    needs_cpu_seq_lens: bool = True
+
+    def init_forward_metadata_out_graph(self, forward_batch, in_capture=False):
+        metadata = self._replay_metadata(
+            forward_batch.batch_size,
+            forward_batch.req_pool_indices,
+            forward_batch.forward_mode,
+            forward_batch.spec_info,
+            forward_batch.seq_lens_cpu if not in_capture else None,
+            num_padding=0
+            if in_capture
+            else getattr(forward_batch, "num_padding", None),
+            in_capture=in_capture,
+        )
+        self.forward_metadata = Mamba1Metadata.prepare_decode(
+            metadata, forward_batch.seq_lens
+        )
+
+    def init_forward_metadata(self, forward_batch):
+        self.forward_metadata = Mamba1Metadata.prepare_mixed(
+            self._forward_metadata(forward_batch), forward_batch
+        )
+
+    def forward(self, mixer: MambaMixer1, hidden_states, output, layer_id, **kwargs):
+        layer_cache = self.req_to_token_pool.mamba2_layer_cache(layer_id)
+        mixer.forward(
+            hidden_states=hidden_states,
+            output=output,
+            layer_cache=layer_cache,
+            metadata=self.forward_metadata,
+            use_triton_causal_conv=kwargs.get("use_triton_causal_conv", False),
+        )
+        return output
+
+    def forward_decode(self, *args, **kwargs):
+        raise NotImplementedError("Mamba1AttnBackend.forward handles mixed batches")
+
+    def forward_extend(self, *args, **kwargs):
+        raise NotImplementedError("Mamba1AttnBackend.forward handles mixed batches")
 
 
 class Mamba2AttnBackend(MambaAttnBackendBase):

@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1190",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Added native Jamba/Jamba 1.5 model registration, Mamba-1 recurrent cache metadata/backend support, a portable selective-scan implementation, weight loading, documentation, and regression tests. A deterministic tiny Jamba model loaded and served on one MI350X, and its eight greedy output token IDs exactly matched an independent Transformers reference.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-578a97a17893/venv/bin/python -m pytest -q test/registered/layers/mamba/test_mamba1_selective_scan.py test/registered/models/test_jamba_config.py",
+      "exit_code": 0,
+      "what_was_measured": "Five tests: FP32 and BF16 GPU selective-scan output/state against an independent recurrence, invalid-rank rejection, Jamba 1.5 layer/cache layout, and native architecture registration."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python SGLANG_CACHE_DIR=/tmp/amdpilot-repo-j-578a97a17893/cache /tmp/amdpilot-repo-j-578a97a17893/venv/bin/python /tmp/amdpilot-repo-j-578a97a17893/runner/reports/j-1fc9870820b9/run_server_probe.py --fixture /tmp/amdpilot-repo-j-578a97a17893/tiny-random-jamba --output /tmp/amdpilot-repo-j-578a97a17893/jamba-server-evidence-3",
+      "exit_code": 0,
+      "what_was_measured": "Real SGLang server startup, native Jamba weight loading, Mamba cache allocation, GPU prefill/decode, generate/completions/batch/stream HTTP paths, and owned-process cleanup."
+    },
+    {
+      "command": "Transformers AutoModelForCausalLM greedy generation on the same deterministic tiny Jamba weights",
+      "exit_code": 0,
+      "what_was_measured": "Independent GPU numerical/generation reference: Transformers and SGLang both produced [15, 10, 11, 12, 51, 31, 5, 4] for 'hello world'."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-578a97a17893/precommit /opt/venv/bin/pre-commit run --files <changed files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, and registered-test policy checks."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2. Raw server evidence: /tmp/amdpilot-repo-j-578a97a17893/jamba-server-evidence-3; unit-test log: /tmp/amdpilot-repo-j-578a97a17893/pytest-jamba.log.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native C++/HIP source changed, so a native rebuild was not applicable.",
+    "The public Jamba 1.5 checkpoints are gated and their 52B/399B parameter sizes exceed the single-GPU qualification scope; real Jamba 1.5 checkpoint accuracy and tensor-parallel serving were not run.",
+    "The deterministic tiny fixture validates architecture execution, weight mapping, cache transitions, transport, and agreement with Transformers, but not pretrained-model semantic accuracy.",
+    "Mamba-1 prefill uses a correctness-first PyTorch recurrence rather than a fused selective-scan kernel; long-context performance remains unqualified.",
+    "NPU support is explicitly rejected because no Mamba-1 backend is implemented there; speculative decoding, LoRA, quantization, pipeline parallelism, and radix-prefix reuse were not qualified."
+  ]
+}

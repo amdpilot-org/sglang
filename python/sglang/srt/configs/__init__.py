@@ -31,6 +31,7 @@ from sglang.srt.configs.interns2_mobius import (
     InternS2MobiusVisionConfig,
 )
 from sglang.srt.configs.interns2preview import InternS2PreviewConfig
+from sglang.srt.configs.jamba import JambaConfig
 from sglang.srt.configs.janus_pro import MultiModalityConfig
 from sglang.srt.configs.jet_nemotron import JetNemotronConfig
 from sglang.srt.configs.jet_vlm import JetVLMConfig
@@ -127,6 +128,7 @@ __all__ = [
     "Dots3Config",
     "FalconH1Config",
     "GraniteMoeHybridConfig",
+    "JambaConfig",
     "HYV4Config",
     "Lfm2Config",
     "Lfm2MoeConfig",
