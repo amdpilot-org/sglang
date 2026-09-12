@@ -1,0 +1,53 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/839",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/799",
+  "candidate_commit": "4f47bef5921d53d3a40186d03225601411530334",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate's two advisory-lock regression tests are correct and pass, but the candidate is test-only and overstates the scope of the fix already present on the prepared base. The base had already moved expert_pack_mxfp4 from PyTorch FileBaton to SGLang load_jit/fcntl.flock, which fixes ownerless stale-lock files and dead lock owners. It does not bound a live compiler or kernel stall: a second acquisition still waits indefinitely until an external timeout. The original issue's proposed contract explicitly contained stale shared locks, compiler stalls, and kernel stalls with a bounded process-group timeout and retry. The exact H200 intermittent failure could not be run on the assigned AMD gfx950 system, and the MXFP4 source did not compile under ROCm because cuda_bf16.h is unavailable.",
+  "tests": [
+    {
+      "command": "timeout 2 /tmp/amdpilot-repo-j-fb688fc64d89/venv/bin/python -u - <legacy FileBaton ownerless-lock reproduction>",
+      "exit_code": 124,
+      "what_was_measured": "On the exact prepared base, PyTorch FileBaton remained blocked on a pre-existing ownerless lock file until the external deadline, deterministically reproducing the reported stale-file mechanism."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fb688fc64d89/venv/bin/python -m pytest -q test/registered/kernels/test_jit_cache.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 4f47bef5921d53d3a40186d03225601411530334, all 44 JIT-cache tests passed, including the two added advisory-lock recovery tests. Imports resolved to /job/repo/python/sglang, not an installed SGLang copy."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-fb688fc64d89/venv/bin/python -u - <independent SIGKILL lock-holder test>",
+      "exit_code": 0,
+      "what_was_measured": "After SIGKILL of the advisory-lock owner, reacquisition completed in 0.000066 seconds while the .lock path remained, independently confirming dead-owner recovery."
+    },
+    {
+      "command": "timeout 2 /tmp/amdpilot-repo-j-fb688fc64d89/venv/bin/python -u - <independent live-holder second-acquisition test>",
+      "exit_code": 124,
+      "what_was_measured": "A live holder caused a second _build_lock acquisition to remain blocked until the external deadline; load_jit supplies no bounded wait, process-group kill, or retry for a live compiler stall."
+    },
+    {
+      "command": "SGLANG_JIT_CACHE_DIR=/tmp/amdpilot-repo-j-fb688fc64d89/jit-review-cold HIP_VISIBLE_DEVICES=0 timeout 300 /tmp/amdpilot-repo-j-fb688fc64d89/venv/bin/python -m pytest -q -s -x test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 1,
+      "what_was_measured": "The exact candidate reached hipcc with --offload-arch=gfx950 but failed before kernel execution because expert_pack_mxfp4.cuh includes unavailable NVIDIA header cuda_bf16.h."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "One AMD Instinct MI355X was visible as gfx950:sramecc+:xnack-. hipcc targeted gfx950, but compilation failed at cuda_bf16.h before an MXFP4 kernel or numerical reference executed.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "Candidate commit 4f47bef changes only Python tests and report artifacts; it changes no native source or native build input, so no native rebuild was applicable. The cold JIT attempt used the checkout source path and real pinned ROCm compiler.",
+  "remaining_counterexamples": [
+    "While a compiler-owning process remains alive but its compiler child or build call stalls, _build_lock has no timeout and every waiter can remain blocked indefinitely; the independent live-holder test required an external timeout.",
+    "The candidate does not add the issue-proposed isolated process group, bounded timeout, fresh TORCH_EXTENSIONS_DIR/JIT cache, or retry, so it does not contain compiler stalls or kernel stalls.",
+    "The candidate regression exercises generic _build_lock directly and does not run the registered MXFP4 test through its JIT path.",
+    "The candidate PR body cites https://github.com/amdpilot-org/sglang/issues/757 instead of the required mirror issue https://github.com/amdpilot-org/sglang/issues/839."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA H200 was available, so the intermittent H200 CI event was not reproduced statistically or end-to-end.",
+    "The assigned gfx950 ROCm environment cannot compile the NVIDIA-specific MXFP4 source because cuda_bf16.h is unavailable; GPU numerical correctness remains unverified.",
+    "The historical CI logs establish a hang pattern but do not prove whether each event was an ownerless FileBaton file, a live compiler stall, or a kernel stall."
+  ]
+}
