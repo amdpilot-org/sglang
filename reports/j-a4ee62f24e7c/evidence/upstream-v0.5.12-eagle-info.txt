@@ -1,0 +1,141 @@
+            )
+
+            # coins for rejection sampling
+            coins = torch.rand_like(
+                candidates, dtype=torch.float32, device=batch.device
+            )
+            # coins for final sampling
+            coins_for_final_sampling = torch.rand(
+                (bs,), dtype=torch.float32, device=batch.device
+            )
+            tree_speculative_sampling_target_only(
+                predicts=predict,  # mutable
+                accept_index=accept_index,  # mutable
+                accept_token_num=num_correct_drafts,  # mutable
+                candidates=candidates,
+                # kwarg LHS retained as `retrive_*` to match sgl_kernel op schema.
+                retrive_index=self.retrieve_index,
+                retrive_next_token=self.retrieve_next_token,
+                retrive_next_sibling=self.retrieve_next_sibling,
+                uniform_samples=coins,
+                uniform_samples_for_final_sampling=coins_for_final_sampling,
+                target_probs=target_probs,
+                draft_probs=draft_probs,
+                threshold_single=get_global_server_args().speculative_accept_threshold_single,
+                threshold_acc=get_global_server_args().speculative_accept_threshold_acc,
+                deterministic=True,
+            )
+
+            # Sync sampling results across TP ranks: different GPUs may
+            # produce slightly different target_probs due to floating-point
+            # non-determinism in softmax/top_k/top_p, causing different
+            # sampled tokens. Broadcast from rank 0 to ensure consistency.
+            tp_group = (
+                get_attention_tp_group()
+                if is_dp_attention_enabled()
+                else get_tp_group()
+            )
+            if tp_group.world_size > 1:
+                tp_group.broadcast(predict, src=0)
+                tp_group.broadcast(accept_index, src=0)
+                tp_group.broadcast(num_correct_drafts, src=0)
+
+        if SIMULATE_ACC_LEN > 0.0:
+            # Do simulation
+            accept_index = generate_simulated_accept_index(
+                accept_index=accept_index,
+                predict=predict,  # mutable
+                num_correct_drafts=num_correct_drafts,  # mutable
+                bs=bs,
+                spec_steps=self.spec_steps,
+            )
+
+        unfinished_index = []
+        unfinished_accept_index = []
+        accept_index_cpu = accept_index.tolist()
+        predict_cpu = predict.tolist()
+        has_finished = False
+        think_end_id = batch.model_config.think_end_id
+
+        # Iterate every accepted token and check if req has finished after append the token
+        # should be checked BEFORE free kv cache slots
+        for i, (req, accept_index_row) in enumerate(zip(batch.reqs, accept_index_cpu)):
+            num_accept_tokens = 0
+            for j, idx in enumerate(accept_index_row):
+                if idx == -1:
+                    break
+                num_accept_tokens += 1
+                id = predict_cpu[idx]
+                req.output_ids.append(id)
+                if req.require_reasoning and think_end_id is not None:
+                    req.update_reasoning_tokens(id, think_end_id)
+                req.check_finished()
+                if not req.finished() and req.grammar is not None:
+                    try:
+                        req.grammar.accept_token(id)
+                    except ValueError as e:
+                        logger.info(
+                            f"{i=}, {req=}\n" f"{accept_index=}\n" f"{predict=}\n"
+                        )
+                        raise e
+                    req.check_finished()
+                if req.finished():
+                    has_finished = True
+                    # set all tokens after finished token to -1 and break
+                    accept_index[i, j + 1 :] = -1
+                    break
+            # Update KV cache tracking for the accepted tokens
+            req.kv_committed_len += num_accept_tokens
+            req.kv_allocated_len = req.kv_committed_len
+            if not req.finished():
+                unfinished_index.append(i)
+                if idx == -1:
+                    unfinished_accept_index.append(accept_index[i, :j])
+                else:
+                    unfinished_accept_index.append(accept_index[i])
+            req.spec_verify_ct += 1
+            num_correct_drafts_this_req = (
+                sum(1 for idx in accept_index_row if idx != -1) - 1
+            )
+            req.spec_num_correct_drafts += num_correct_drafts_this_req
+            req.update_spec_correct_drafts_histogram(num_correct_drafts_this_req)
+
+        if has_finished:
+            num_correct_drafts = (accept_index != -1).sum(dim=1) - 1
+
+        # Free the KV cache for unaccepted tokens
+        # TODO: fuse them
+        accept_index = accept_index[accept_index != -1]
+        accept_tokens = predict[accept_index]
+        evict_mask = torch.full_like(self.draft_token, True, dtype=torch.bool)
+        evict_mask[accept_index] = False
+        num_correct_drafts_cpu = num_correct_drafts.cpu()
+        num_accept_tokens_cpu = num_correct_drafts_cpu + 1
+        # FIXME: this `tolist()` fixes the numerical calculation consistency
+        # try to unify the tensor representation and list representation
+        num_correct_drafts_list = num_correct_drafts_cpu.tolist()
+        num_accept_tokens_list = num_accept_tokens_cpu.tolist()
+
+        if page_size == 1:
+            # TODO: boolean array index leads to a device sync. Remove it.
+            token_to_kv_pool_allocator.free(batch.out_cache_loc[evict_mask])
+        else:
+            if self.topk == 1:
+                # Only evict full empty page. Do not evict partial empty page
+                align_evict_mask_to_page_size[len(batch.seq_lens),](
+                    batch.seq_lens,
+                    evict_mask,
+                    page_size,
+                    self.draft_token_num,
+                    next_power_of_2(self.draft_token_num),
+                )
+                token_to_kv_pool_allocator.free(batch.out_cache_loc[evict_mask])
+            else:
+                # Shift the accepted tokens to the beginning.
+                # Only evict the last part
+                src_cache_loc, tgt_cache_loc, to_free_num_slots = get_src_tgt_cache_loc(
+                    batch.seq_lens,
+                    batch.out_cache_loc,
+                    accept_index,
+                    num_correct_drafts,
+                    self.draft_token_num,
