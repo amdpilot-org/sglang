@@ -244,6 +244,8 @@ class GenerateReqInput:
     stream: bool = False
     # Whether to log metrics for this request (e.g. health_generate calls do not log metrics)
     log_metrics: bool = True
+    # Whether to return measured request timings in OpenAI-compatible responses.
+    return_request_metrics: bool = False
     # Whether to return hidden states
     return_hidden_states: Union[
         List[ReturnHiddenStatesMode], ReturnHiddenStatesMode

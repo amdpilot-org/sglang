@@ -354,6 +354,7 @@ class CompletionRequest(BaseModel):
     routed_experts_start_len: int = 0
     return_cached_tokens_details: bool = False
     return_spec_tokens_details: bool = False
+    return_request_metrics: bool = False
     return_token_ids: bool = False
 
     # Extra parameters for SRT backend only and will be ignored by OpenAI models.
@@ -429,6 +430,21 @@ class SpecTokensDetails(BaseModel):
     spec_cap_lens_histogram: List[int] = Field(default_factory=list)
 
 
+class RequestMetrics(BaseModel):
+    """Measured per-request latency and generation metrics."""
+
+    queue_time: Optional[float] = None
+    time_to_first_token: Optional[float] = None
+    generation_time: Optional[float] = None
+    e2e_latency: Optional[float] = None
+    mean_inter_token_latency: Optional[float] = None
+    output_token_throughput: Optional[float] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
 class SglExt(BaseModel):
     """SGLang extension fields for OpenAI-compatible responses.
 
@@ -441,6 +457,7 @@ class SglExt(BaseModel):
     spec_tokens_details: Optional[Union[SpecTokensDetails, List[SpecTokensDetails]]] = (
         None
     )
+    request_metrics: Optional[Union[RequestMetrics, List[RequestMetrics]]] = None
     input_ids: Optional[List[int]] = None
     output_ids: Optional[List[List[int]]] = None
 
@@ -882,6 +899,7 @@ class ChatCompletionRequest(BaseModel):
     routed_experts_start_len: int = 0
     return_cached_tokens_details: bool = False
     return_spec_tokens_details: bool = False
+    return_request_metrics: bool = False
     return_prompt_token_ids: bool = False
     return_token_ids: bool = False
     return_meta_info: bool = False

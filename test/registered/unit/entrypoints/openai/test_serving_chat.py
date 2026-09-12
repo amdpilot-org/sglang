@@ -3028,6 +3028,29 @@ class ServingChatTestCase(unittest.TestCase):
         self.assertIn("sglext", dumped_response)
         self.assertNotIn("meta_info", dumped_response["choices"][0])
 
+    def test_non_streaming_request_metrics_are_isolated_per_choice(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            max_tokens=2,
+            n=2,
+            return_request_metrics=True,
+        )
+        ret = [_spec_result(index) for index in range(2)]
+        ret[0]["meta_info"].update(
+            {"time_to_first_token": 0.2, "e2e_latency": 0.8}
+        )
+        ret[1]["meta_info"].update(
+            {"time_to_first_token": 0.4, "e2e_latency": 1.2}
+        )
+
+        response = self.chat._build_chat_response(req, ret, 1234567890)
+        metrics = response.model_dump()["sglext"]["request_metrics"]
+        self.assertEqual(
+            [item["time_to_first_token"] for item in metrics], [0.2, 0.4]
+        )
+        self.assertEqual([item["e2e_latency"] for item in metrics], [0.8, 1.2])
+
     def test_non_streaming_meta_info_omits_response_level_routed_experts(self):
         req = ChatCompletionRequest(
             model="x",
