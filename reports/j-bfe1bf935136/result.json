@@ -1,0 +1,58 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "b083b511e7dcc34ac3fd22b8b980bd6006c64037",
+  "outcome": "candidate_verified",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate provides working bounded retry supervision for the registered test, but is test-only hardening rather than a production lock/root-cause fix. H200 behavior and MXFP4 kernel execution could not be verified on the assigned AMD gfx950. The exact PR body also links mirror issue 1814 instead of the required current mirror issue 1884.",
+  "tests": [
+    {
+      "command": "python test/registered/expert_pack/test_expert_pack_mxfp4.py (recorded base)",
+      "exit_code": 1,
+      "what_was_measured": "Actual source and JIT compiler path; HIP compilation reached gfx950 and failed on unavailable CUDA-only cuda_bf16.h after running four tests."
+    },
+    {
+      "command": "timeout --signal=KILL 3s python <base pre-result stall injection>",
+      "exit_code": 137,
+      "what_was_measured": "The base registered file had no internal deadline and remained stalled until the independent external timeout killed it."
+    },
+    {
+      "command": "python -m pytest -vv test/registered/kernels/test_jit_cache.py -k 'mxfp4_registered_test_retries_a_stalled_worker_attempt or build_lock_ignores_an_orphaned_lock_file or build_lock_is_released_when_the_holder_process_dies or build_lock_excludes_a_second_holder'",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate supervisor regression and advisory-lock boundaries; 4 passed, 41 deselected in 38.04 seconds."
+    },
+    {
+      "command": "SGLANG_MXFP4_TEST_TIMEOUT_SECONDS=0.5 SGLANG_MXFP4_TEST_STALL_ATTEMPT=2 SGLANG_MXFP4_TEST_SUPERVISOR_SELF_TEST=1 python test/registered/expert_pack/test_expert_pack_mxfp4.py",
+      "exit_code": 124,
+      "what_was_measured": "Independent final-attempt timeout boundary; both worker process groups were bounded and killed."
+    },
+    {
+      "command": "python test/registered/expert_pack/test_expert_pack_mxfp4.py (exact candidate)",
+      "exit_code": 1,
+      "what_was_measured": "Fresh per-attempt cache and actual candidate JIT entry; HIP compilation failed on cuda_bf16.h before any MXFP4 kernel execution."
+    },
+    {
+      "command": "timeout 3s python <live _build_lock holder and contender>",
+      "exit_code": 124,
+      "what_was_measured": "A contender remains blocked while the advisory-lock owner is alive; production lock acquisition is intentionally unbounded."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned AMD Instinct MI350X was detected and hipcc was invoked with --offload-arch=gfx950:sramecc+:xnack-, but compilation stopped at missing cuda_bf16.h; no MXFP4 kernel ran."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "The exact intermittent NVIDIA H200 stall was not statistically reproduced because only AMD gfx950 was assigned.",
+    "The production _build_lock remains unbounded while a live owner holds it; the candidate bounds only this registered test process.",
+    "The supervisor regression exits its self-test worker before unittest discovery, MXFP4 JIT compilation, or GPU kernel execution.",
+    "The exact candidate PR body links https://github.com/amdpilot-org/sglang/issues/1814 instead of the required current mirror issue https://github.com/amdpilot-org/sglang/issues/1884."
+  ],
+  "remaining_limitations": [
+    "No NVIDIA H200 was available.",
+    "The CUDA-only MXFP4 extension cannot compile on the assigned ROCm gfx950 environment because cuda_bf16.h is unavailable.",
+    "No GPU numerical comparison or intermittent-failure-rate measurement was possible.",
+    "No native rebuild was applicable because the candidate changes only Python tests and reports."
+  ]
+}
