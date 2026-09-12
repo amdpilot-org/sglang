@@ -6,8 +6,10 @@ from sglang.srt.multimodal.cache.identity import (
     PreprocessFingerprintProvider,
     build_artifact_key,
     build_processor_fingerprint,
+    cache_id_content_digest,
     media_preprocess_kwargs,
     parse_content_hash,
+    parse_cache_id,
     resolve_multimodal_item_hash,
     snapshot_media,
 )
@@ -29,9 +31,11 @@ __all__ = [
     "PreprocessFingerprintProvider",
     "build_artifact_key",
     "build_processor_fingerprint",
+    "cache_id_content_digest",
     "estimate_cache_size_bytes",
     "media_preprocess_kwargs",
     "parse_content_hash",
+    "parse_cache_id",
     "resolve_multimodal_item_hash",
     "snapshot_media",
 ]

@@ -21,8 +21,18 @@ from sglang.srt.runtime_context import get_mm, get_model
 
 CONTENT_HASH_PREFIX = "sha256:"
 _SHA256_HEX_LENGTH = 64
+_MAX_CACHE_ID_BYTES = 1024
 _MEDIA_ENVELOPE_FIELDS = frozenset(
-    {"type", "format", "url", "image", "video", "audio", "content_hash"}
+    {
+        "type",
+        "format",
+        "url",
+        "image",
+        "video",
+        "audio",
+        "content_hash",
+        "cache_id",
+    }
 )
 
 
@@ -47,6 +57,26 @@ def parse_content_hash(value: Optional[str]) -> Optional[str]:
     except ValueError as exc:
         raise ValueError("content_hash contains non-hexadecimal characters") from exc
     return CONTENT_HASH_PREFIX + digest.lower()
+
+
+def parse_cache_id(value: Optional[str]) -> Optional[str]:
+    """Validate an opaque caller-managed multimodal cache identity."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError("cache_id must be a non-empty string")
+    if len(value.encode("utf-8")) > _MAX_CACHE_ID_BYTES:
+        raise ValueError(
+            f"cache_id must be at most {_MAX_CACHE_ID_BYTES} UTF-8 bytes"
+        )
+    return value
+
+
+def cache_id_content_digest(cache_id: str) -> str:
+    """Map an opaque ID into the content-digest namespace without ambiguity."""
+    cache_id = parse_cache_id(cache_id)
+    assert cache_id is not None
+    return _hash_parts(b"sglang-multimodal-caller-id-v1", cache_id.encode("utf-8"))
 
 
 def _digest_bytes(payload: bytes) -> str:

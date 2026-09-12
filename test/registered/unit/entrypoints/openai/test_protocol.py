@@ -22,6 +22,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     ChatCompletionMessageContentAudioPart,
     ChatCompletionMessageContentAudioURLPart,
     ChatCompletionMessageContentImageURL,
+    ChatCompletionMessageContentVideoPart,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionResponseChoice,
@@ -30,6 +31,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     Function,
     ModelCard,
     ModelList,
+    ResponsesRequest,
     Tool,
     UsageInfo,
 )
@@ -774,6 +776,67 @@ class TestValidationEdgeCases(unittest.TestCase):
         """Test negative token limits"""
         with self.assertRaises(ValidationError):
             CompletionRequest(model="test-model", prompt="Hello", max_tokens=-1)
+
+    def test_cache_id_is_preserved_for_every_chat_media_type(self):
+        request = ChatCompletionRequest(
+            model="test-model",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "i", "cache_id": "same"},
+                        },
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": "v", "cache_id": "same"},
+                        },
+                        {
+                            "type": "audio_url",
+                            "audio_url": {"url": "a", "cache_id": "same"},
+                        },
+                    ],
+                }
+            ],
+        )
+        dumped = request.model_dump()["messages"][0]["content"]
+        self.assertEqual(
+            [
+                part[next(key for key in part if key.endswith("_url"))]["cache_id"]
+                for part in dumped
+            ],
+            ["same", "same", "same"],
+        )
+
+    def test_cache_id_rejects_empty_and_oversized_values(self):
+        for cache_id in ("", "x" * 1025):
+            with self.subTest(cache_id_length=len(cache_id)), self.assertRaises(
+                ValidationError
+            ):
+                ChatCompletionMessageContentImageURL(url="i", cache_id=cache_id)
+
+    def test_responses_input_image_retains_cache_id_for_replay(self):
+        request = ResponsesRequest.model_validate(
+            {
+                "model": "test-model",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "image",
+                                "cache_id": "turn-stable",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        part = request.model_dump()["input"][0]["content"][0]
+        self.assertEqual(part["type"], "image_url")
+        self.assertEqual(part["image_url"]["cache_id"], "turn-stable")
 
 
 class TestParsedResponseFieldsProtocol(unittest.TestCase):
