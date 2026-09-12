@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35642",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1420",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1386",
+  "candidate_commit": "672567d14035030cc18c6075f5c8c5cee8d5efd5",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The original waiting-queue scan after a resumed chunk exhausts the scheduling budget was reproduced on the recorded base. At the exact candidate commit, the regression and independent cache-entry-path boundary cases pass. The change skips only waiting-request admission for a non-CONTINUE post-chunk budget while preserving resumed-chunk batching and allocator/bookkeeping paths.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bd15c0f82951/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunk_budget_gate.py (candidate test file against base production source)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction at 358c163: exhausted OTHER and NO_TOKEN cases each performed the forbidden admission iteration; CONTINUE passed. Raw log: /job/review-evidence-j-bd15c0f82951/base-candidate-regression.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bd15c0f82951/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunk_budget_gate.py test/registered/unit/managers/test_prefill_adder.py",
+      "exit_code": 0,
+      "what_was_measured": "At candidate 672567d, 31 tests and 12 subtests passed, covering the scheduler gate and real PrefillAdder budget behavior. Raw log: /job/review-evidence-j-bd15c0f82951/candidate-focused.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bd15c0f82951/venv/bin/python - (independent adversarial scheduler harness)",
+      "exit_code": 0,
+      "what_was_measured": "Verified exhausted OTHER prevents waiting request init_next_round_input/cache entry, CONTINUE reaches it once, absence of a resumed chunk reaches it once, and Mamba alloc_group_begin(0)/alloc_group_end remain balanced. Raw log: /job/review-evidence-j-bd15c0f82951/candidate-adversarial.log"
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "No GPU was used. The issue and reproduction are deterministic Python scheduler control flow before engine/model execution; GPU or tiny-model startup would be unrelated evidence.",
+  "native_rebuilt": false,
+  "native_rebuild_evidence": "The candidate changes scheduler Python, a Python unit test, and reports only. No C++/HIP/native source or build definition changed, so no native rebuild was required.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No full model-serving, semantic-accuracy, or distributed workload was run or claimed; the original contract requires none.",
+    "The scheduler was exercised with isolated dependencies and controlled request/cache mocks rather than model weights.",
+    "The prepared environment is gfx950-capable with ROCm 7.2 and Torch 2.11.0+rocm7.2, but architecture-specific execution was not relevant to this Python control-flow defect.",
+    "Imports emitted an unrelated AITer NUMA-balancing warning; no node-wide configuration was changed."
+  ]
+}
