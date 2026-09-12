@@ -253,7 +253,7 @@ class PoolsideV1Detector(BaseFormatDetector):
                 )
             )
 
-        return StreamingParseResult(normal_text=normal_text, calls=calls)
+        return self._result_with_raw_fallback(text, normal_text, calls)
 
     # ---------- Streaming ----------
 

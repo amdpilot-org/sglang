@@ -54,7 +54,7 @@ class HermesDetector(BaseFormatDetector):
                     calls.extend(self.parse_base_json(parsed, tools))
                 else:
                     calls.extend(self.parse_base_json(parsed, tools))
-            return StreamingParseResult(normal_text=normal_text, calls=calls)
+            return self._result_with_raw_fallback(text, normal_text, calls)
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}")
             return StreamingParseResult(normal_text=text)

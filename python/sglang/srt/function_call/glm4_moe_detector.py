@@ -229,7 +229,7 @@ class Glm4MoeDetector(BaseFormatDetector):
                 # construct match_result for parse_base_json
                 match_result = {"name": func_name, "parameters": arguments}
                 calls.extend(self.parse_base_json(match_result, tools))
-            return StreamingParseResult(normal_text=normal_text, calls=calls)
+            return self._result_with_raw_fallback(text, normal_text, calls)
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}", exc_info=True)
             # return the normal text if parsing fails

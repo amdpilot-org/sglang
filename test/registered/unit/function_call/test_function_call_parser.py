@@ -14,6 +14,7 @@ from sglang.srt.function_call.core_types import StreamingParseResult
 from sglang.srt.function_call.deepseekv3_detector import DeepSeekV3Detector
 from sglang.srt.function_call.deepseekv4_detector import DeepSeekV4Detector
 from sglang.srt.function_call.deepseekv32_detector import DeepSeekV32Detector
+from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.function_call.gemma4_detector import (
     Gemma4Detector,
     _parse_gemma4_args,
@@ -24,6 +25,7 @@ from sglang.srt.function_call.gigachat3_detector import GigaChat3Detector
 from sglang.srt.function_call.glm4_moe_detector import Glm4MoeDetector
 from sglang.srt.function_call.glm47_moe_detector import Glm47MoeDetector
 from sglang.srt.function_call.gpt_oss_detector import GptOssDetector
+from sglang.srt.function_call.hermes_detector import HermesDetector
 from sglang.srt.function_call.inkling_detector import InklingDetector
 from sglang.srt.function_call.json_array_parser import JsonArrayParser
 from sglang.srt.function_call.kimik2_detector import KimiK2Detector
@@ -45,6 +47,62 @@ def _shared_tokenizer(path: str):
     from sglang.srt.utils.hf_transformers_utils import get_tokenizer
 
     return get_tokenizer(path)
+
+
+class TestIncompleteToolCallFallback(unittest.TestCase):
+    def setUp(self):
+        self.tools = [
+            Tool(
+                type="function",
+                function=Function(
+                    name="get_weather",
+                    parameters={"type": "object", "properties": {}},
+                ),
+            )
+        ]
+
+    def test_bare_open_markers_remain_visible_when_no_call_is_parsed(self):
+        cases = {
+            "mistral": "[TOOL_CALLS",
+            "cohere_command4": "<|START_ACTION|>",
+            "deepseekv3": "<｜tool▁calls▁begin｜>",
+            "deepseekv31": "<｜tool▁calls▁begin｜>",
+            "glm": "<tool_call>",
+            "glm45": "<tool_call>",
+            "hermes": "<tool_call>",
+            "hunyuan": "<tool_calls>",
+            "lfm2": "<|tool_call_start|>",
+            "mimo": "<tool_call>",
+            "poolside_v1": "<tool_call>",
+            "qwen3_coder": "<tool_call>",
+            "step3p5": "<tool_call>",
+        }
+        for parser_name, text in cases.items():
+            with self.subTest(parser=parser_name):
+                result = FunctionCallParser.ToolCallParserEnum[
+                    parser_name
+                ]().detect_and_parse(text, self.tools)
+                self.assertEqual(result.calls, [])
+                self.assertEqual(result.normal_text, text)
+
+    def test_text_before_incomplete_marker_is_not_partially_discarded(self):
+        text = "Visible prefix <tool_call>"
+        result = HermesDetector().detect_and_parse(text, self.tools)
+        self.assertEqual(result.calls, [])
+        self.assertEqual(result.normal_text, text)
+
+    def test_complete_call_still_consumes_protocol_markup(self):
+        text = '<tool_call>{"name":"get_weather","arguments":{}}</tool_call>'
+        result = HermesDetector().detect_and_parse(text, self.tools)
+        self.assertEqual(result.normal_text, "")
+        self.assertEqual(len(result.calls), 1)
+        self.assertEqual(result.calls[0].name, "get_weather")
+
+    def test_plain_text_is_unchanged(self):
+        text = "There is no tool call here."
+        result = HermesDetector().detect_and_parse(text, self.tools)
+        self.assertEqual(result.calls, [])
+        self.assertEqual(result.normal_text, text)
 
 
 class TestInklingDetector(unittest.TestCase):

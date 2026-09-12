@@ -237,7 +237,7 @@ class Qwen3CoderDetector(BaseFormatDetector):
                 start_idx = text.find(self.tool_call_prefix)
             normal_text = text[:start_idx] if start_idx > 0 else ""
 
-            return StreamingParseResult(normal_text=normal_text, calls=calls)
+            return self._result_with_raw_fallback(text, normal_text, calls)
 
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}")

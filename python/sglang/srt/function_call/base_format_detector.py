@@ -74,6 +74,15 @@ class BaseFormatDetector(ABC):
             tool.function.name: i for i, tool in enumerate(tools) if tool.function.name
         }
 
+    @staticmethod
+    def _result_with_raw_fallback(
+        text: str, normal_text: str, calls: List[ToolCallItem]
+    ) -> StreamingParseResult:
+        """Keep the source text when a detected tool-call block parsed no calls."""
+        if not calls:
+            normal_text = text
+        return StreamingParseResult(normal_text=normal_text, calls=calls)
+
     def parse_base_json(self, action: Any, tools: List[Tool]) -> List[ToolCallItem]:
         tool_indices = self._get_tool_indices(tools)
         if not isinstance(action, list):

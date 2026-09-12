@@ -337,7 +337,7 @@ class HunyuanDetector(BaseFormatDetector):
                         parameters=json.dumps(arg_dict, ensure_ascii=False),
                     )
                 )
-            return StreamingParseResult(normal_text=normal_text, calls=calls)
+            return self._result_with_raw_fallback(text, normal_text, calls)
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}", exc_info=True)
             return StreamingParseResult(normal_text=text)

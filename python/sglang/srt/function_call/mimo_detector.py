@@ -193,7 +193,7 @@ class MiMoDetector(BaseFormatDetector):
 
             last_end = match.end()
 
-        return StreamingParseResult(normal_text=normal_text, calls=calls)
+        return self._result_with_raw_fallback(text, normal_text, calls)
 
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]

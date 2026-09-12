@@ -78,12 +78,11 @@ class CohereCommand4Detector(BaseFormatDetector):
                     f"Cohere tool-call body did not parse as JSON: {e}; "
                     "returning surrounding text as normal output."
                 )
-                return StreamingParseResult(normal_text=normal_text)
+                return self._result_with_raw_fallback(text, normal_text, [])
 
         normalized = self._normalize_calls(arr)
-        return StreamingParseResult(
-            normal_text=normal_text,
-            calls=self.parse_base_json(normalized, tools),
+        return self._result_with_raw_fallback(
+            text, normal_text, self.parse_base_json(normalized, tools)
         )
 
     def parse_streaming_increment(
