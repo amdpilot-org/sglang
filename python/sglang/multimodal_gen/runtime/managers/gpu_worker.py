@@ -101,6 +101,7 @@ from sglang.multimodal_gen.runtime.utils.trace_wrapper import (
     init_diffusion_tracing,
     trace_slice,
 )
+from sglang.srt.environ import envs as srt_envs
 from sglang.srt.environ import third_party_cache_defaults
 from sglang.srt.utils.network import NetworkAddress
 
@@ -280,8 +281,13 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
 
     def _configure_persistent_torch_compile_cache(self) -> None:
         """Persist torch.compile's Inductor/Triton cache across restarts"""
-        compile_cache_root = os.path.join(
-            envs.SGLANG_DIFFUSION_CACHE_ROOT, "torch_compile_cache"
+        # Preserve the diffusion-specific root when an operator selected it.
+        # Otherwise participate in the process-wide unified JIT layout.
+        diffusion_root = os.getenv("SGLANG_DIFFUSION_CACHE_ROOT")
+        compile_cache_root = (
+            os.path.join(diffusion_root, "torch_compile_cache")
+            if diffusion_root
+            else os.path.expanduser(srt_envs.SGLANG_JIT_CACHE_ROOT.get())
         )
         tmp_root = tempfile.gettempdir()
         sglang_defaults = third_party_cache_defaults()

@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/19612",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Implemented SGLANG_JIT_CACHE_ROOT with XDG-aware defaults, legacy SGLANG_CACHE_DIR fallback, fixed triton/inductor/torch_compile/deep_gemm layout, per-cache compatibility overrides, import-time DeepGEMM configuration, and protection against later SGLangBackend/Inductor cache relocation. The already-merged SGLANG_CACHE_DIR consolidation was reproduced as incomplete before this change.",
+  "tests": [
+    {
+      "command": "SGLANG_JIT_CACHE_ROOT=/tmp/amdpilot-repo-j-4763cf8dd78c/repro-root XDG_CACHE_HOME=/tmp/amdpilot-repo-j-4763cf8dd78c/xdg-cache /tmp/amdpilot-repo-j-4763cf8dd78c/venv/bin/python < before-contract reproduction",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: SGLANG_JIT_CACHE_ROOT was absent and InductorAdaptor relocated TRITON_CACHE_DIR and TORCHINDUCTOR_CACHE_DIR into a graph-local directory. Raw output: reports/j-4763cf8dd78c/evidence/before_cache_contract.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4763cf8dd78c/venv/bin/python -m pytest -q test/registered/unit/test_jit_cache_root.py test/registered/unit/test_environ.py",
+      "exit_code": 0,
+      "what_was_measured": "22 tests plus 2 subtests covering XDG/default layout, legacy and explicit precedence, native third-party compatibility, clean-process import redirection, DeepGEMM import ordering, and resistance to later Inductor relocation. Raw output: reports/j-4763cf8dd78c/evidence/unit_tests_final.txt"
+    },
+    {
+      "command": "pre-commit run --files docs/docs/references/environment_variables.mdx python/sglang/multimodal_gen/runtime/managers/gpu_worker.py python/sglang/srt/compilation/backend.py python/sglang/srt/compilation/compiler_interface.py python/sglang/srt/entrypoints/engine.py python/sglang/srt/environ.py python/sglang/srt/layers/deep_gemm_wrapper/compile_utils.py scripts/ci/cuda/warmup_deep_gemm.py test/registered/unit/test_jit_cache_root.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, AST, registry and policy hooks for every changed source/test/doc file. Raw output: reports/j-4763cf8dd78c/evidence/precommit_final.txt"
+    },
+    {
+      "command": "env -u TRITON_CACHE_DIR -u TORCHINDUCTOR_CACHE_DIR -u CUDA_CACHE_PATH -u FLASHINFER_WORKSPACE_BASE SGLANG_JIT_CACHE_ROOT=/tmp/amdpilot-repo-j-4763cf8dd78c/gpu-jit-cache /tmp/amdpilot-repo-j-4763cf8dd78c/venv/bin/python < torch.compile GPU numerical check",
+      "exit_code": 0,
+      "what_was_measured": "Real ROCm Inductor/Triton compilation on one MI355X wrote 22 files beneath the configured triton/ and inductor/ directories. Compiled sin(matmul+constant) output was checked against an independent CPU float64 reference (max absolute error 5.5555555693032055e-06). Raw output: reports/j-4763cf8dd78c/evidence/gpu_torch_compile.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "AMD Instinct MI355X, torch 2.11.0+rocm7.2 / HIP 7.2.26015; real generated .amdgcn/.hsaco and Inductor artifacts are listed in reports/j-4763cf8dd78c/evidence/gpu_torch_compile.txt.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No native source changed, so no native rebuild was applicable.",
+    "DeepGEMM is NVIDIA-only and could not be executed on the assigned ROCm MI355X; its cache precedence and before-import assignment were verified without claiming kernel execution.",
+    "CUDA driver and FlashInfer CUDA cache writes could not be exercised on ROCm; their unified-root mapping remains the previously merged setdefault implementation and was inspected in the retained call-site audit.",
+    "An explicitly configured SGLANG_DIFFUSION_CACHE_ROOT remains a compatibility override for diffusion torch.compile caches; without that explicit override, diffusion now uses the unified JIT root.",
+    "No serving/model fixture was run because this feature is process-level cache configuration and the real GPU compiler check directly exercises the affected Inductor/Triton behavior without model weights."
+  ]
+}
