@@ -646,6 +646,14 @@ class Envs:
     # (auto-enabled for GLM-5.2-style DSA); set True to A/B synchronous swap-in.
     SGLANG_DISABLE_HISPARSE_PREFETCH = EnvBool(False)
     SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS = EnvBool(True)
+    # NCCL RAS health collector — detection-only (never aborts/removes ranks).
+    # Job-wide singleton on world rank 0 pulls NCCL RAS STATUS and reports
+    # per-rank error states + dead/unresponsive ranks via Prometheus + logs.
+    SGLANG_NCCL_RAS_ENABLE = EnvBool(False)
+    SGLANG_NCCL_RAS_POLL_INTERVAL = EnvFloat(10.0)  # seconds between polls
+    SGLANG_NCCL_RAS_STUCK_POLLS = EnvInt(3)  # consecutive non-zero frozen samples for advisory stuck
+    # RAS STATUS socket endpoint ("host:port"); falls back to NCCL_RAS_ADDR.
+    SGLANG_NCCL_RAS_ADDR = EnvStr("localhost:28028")
     # Decode batches between SWA out-of-window evictions.
     SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
     # Deprecated: the unified radix tree is the default tree cache now, so the

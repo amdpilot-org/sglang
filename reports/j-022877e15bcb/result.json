@@ -1,0 +1,44 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32928",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "summary": "Ported the complete detection-only NCCL RAS collector from the existing upstream candidate onto the prepared main checkout: world-rank-0 lifecycle/election, tolerant STATUS socket parser, liveness/error/divergence detector, structured warnings, 11 Prometheus signals, environment controls, communicator name passthrough, documentation, and 34 CPU regression/adversarial tests. The prepared node cannot qualify live NCCL RAS because it has one AMD MI350X and ROCm/RCCL reports NCCL API version 2.27.7; RAS requires NVIDIA NCCL 2.28.7+. Therefore the candidate is verified for parser/detector/metrics/lifecycle behavior, but the live multi-node NVIDIA paths remain explicitly unverified here.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-022877e15bcb/venv/bin/python -m pytest -q /tmp/amdpilot-repo-j-022877e15bcb/test_nccl_ras.py",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before regression against the recorded base; collection failed with ModuleNotFoundError for sglang.srt.distributed.nccl_ras. Raw output: reports/j-022877e15bcb/raw/failing-before.log (the original full runner output is also retained at /tmp/amdpilot-repo-j-022877e15bcb/failing-before.log)"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-022877e15bcb/venv/bin/python -m pytest -q test/registered/unit/distributed/test_nccl_ras.py",
+      "exit_code": 0,
+      "what_was_measured": "34 parser, malformed/absent socket payload, connection failure, stale timestamp, per-rank error, missing/dead transition, all-zero dropout, symmetric-hang non-detection, subgroup divergence/recovery, metrics-label/counter, world-rank election, log-only fallback, and NCCL_RAS_ENABLE bootstrap tests passed (plus 2 subtests). Raw output: reports/j-022877e15bcb/raw/unit-tests.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-022877e15bcb/venv/bin/python -m compileall -q python/sglang/srt/distributed/nccl_ras.py python/sglang/srt/managers/scheduler.py python/sglang/srt/observability/metrics_collector.py",
+      "exit_code": 0,
+      "what_was_measured": "The new collector and its scheduler/metrics integration compile under the pinned interpreter. Integration imports of RasMonitor, Scheduler, and SchedulerMetricsCollector also succeeded."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-022877e15bcb/venv/bin/python <one-rank RCCL all_reduce and RasSocketClient probe>",
+      "exit_code": 0,
+      "what_was_measured": "Real execution on the assigned AMD MI350X: a one-rank RCCL all_reduce exactly matched an independent CPU identity reference; torch was 2.11.0+rocm7.2, NCCL API compatibility version was 2.27.7, and localhost:28028 exposed no RAS STATUS endpoint. Raw output: reports/j-022877e15bcb/raw/gpu-capability.log"
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365 --check",
+      "exit_code": 0,
+      "what_was_measured": "No whitespace errors in the complete change against the recorded base."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "reports/j-022877e15bcb/raw/gpu-capability.log records execution on one AMD Instinct MI350X and an exact one-rank RCCL numerical reference. This is capability/blocker evidence only, not live NCCL RAS qualification: RCCL reports API version 2.27.7 and no RAS socket.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Live NCCL RAS STATUS polling and Prometheus emission were not executable on this AMD ROCm/RCCL 2.27.7 node; NVIDIA NCCL 2.28.7+ is required.",
+    "The reported 2-node unresponsive (~5s) and considered_dead (~60s) transitions were not reproduced because only one assigned GPU/node is available and this is not an NVIDIA NCCL RAS environment.",
+    "A TP=2 SGLang serving E2E with live RAS metrics was not run because only one GPU is assigned and the required RAS implementation is unavailable. The deterministic tiny Llama fixture would validate transport/engine execution but cannot supply NCCL RAS or multi-node qualification, so it was not substituted for the missing architecture.",
+    "Symmetric whole-collective hangs intentionally remain outside the RAS divergence detector and are left to the existing forward watchdog, as specified by the feature contract.",
+    "No native source changed and repository-environment.json supplies no native rebuild target, so native_rebuilt is false.",
+    "The communicator name is passed through as groundwork but is intentionally not exported as a Prometheus label; support bundles, health gating, and MONITOR event streaming remain stated non-goals."
+  ]
+}
