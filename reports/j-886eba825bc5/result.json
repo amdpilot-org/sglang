@@ -1,0 +1,47 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34205",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1703",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1666",
+  "candidate_commit": "1216431b2d712b6c9a3a5e1eb3fcfa89963a8d41",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces the missing direct-abort LoRARegistry release. The exact candidate schedules that release and correctly constrains the existing 500/503 consumer fallback to the exact request state it still owns, preventing double release and reused-RID corruption. Candidate and independent exactly-once boundary tests pass.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-886eba825bc5/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_releases_lora_reference -q --junitxml=/job/review-evidence/base/original-regression.xml",
+      "exit_code": 1,
+      "what_was_measured": "On recorded base 358c163, the candidate's original-issue regression failed because LoRARegistry.release was awaited zero times after direct abort."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-886eba825bc5/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_releases_lora_reference test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_error_abort_releases_lora_reference_once test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_error_abort_fallback_releases_owned_lora_reference test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py::TestRidToStateCleanupOnAbort::test_abort_without_lora_does_not_release_reference -q",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 1216431, four focused release-accounting and non-LoRA boundary tests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-886eba825bc5/venv/bin/python -m pytest test/registered/unit/managers/test_tokenizer_manager_rid_cleanup.py -q",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, the complete RID cleanup module passed: 30 tests and 3 subtests."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-886eba825bc5/venv/bin/python -m pytest /job/review-evidence/adversarial_review_test.py -q",
+      "exit_code": 0,
+      "what_was_measured": "Two independently authored cases passed: duplicate abort releases exactly once, and an old error consumer cannot release or delete a newly reused RID state."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 1216431b2d712b6c9a3a5e1eb3fcfa89963a8d41",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_execution_evidence": "The assigned AMD Instinct MI355X was visible as gfx950, but no GPU execution is claimed: the issue and changed code are CPU-side Python async LoRARegistry accounting, so GPU numerical output would be unrelated proof.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No live serving run with real model weights and a real LoRA adapter was performed.",
+    "No model architecture, semantic accuracy, adapter-eviction throughput, or distributed-workload claim is made.",
+    "The candidate changes no native code, so no native rebuild was applicable."
+  ]
+}
