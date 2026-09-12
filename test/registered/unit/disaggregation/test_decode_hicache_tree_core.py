@@ -2,13 +2,17 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import torch
 
+from sglang.srt.disaggregation.base import KVPoll
 from sglang.srt.disaggregation.decode_hicache_mixin import (
     DecodeHiCachePreallocMixin,
+    DecodeHiCacheTransferMixin,
     DecodePrefixMatch,
+    HiCacheRestoreGatedKVReceiver,
+    HiCacheRestoreResult,
 )
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -106,6 +110,88 @@ class TestDecodeHiCacheTreeCore(CustomTestCase):
         self.assertFalse(prefix_match.prefetch_registered)
         tree_cache.get_prefix_hash_values.assert_not_called()
         tree_cache.prefetch_from_storage.assert_not_called()
+
+    def test_l3_only_restore_waits_for_prefetch_before_load_back(self):
+        """A decode restart can have an L3 hit with no L1/L2 coverage."""
+        tree_cache = MagicMock()
+        tree_cache.check_prefetch_progress.return_value = False
+        harness = SimpleNamespace(tree_cache=tree_cache)
+        decode_req = SimpleNamespace(
+            req=SimpleNamespace(rid="req-restart", origin_input_ids=list(range(64))),
+            prefix_match=DecodePrefixMatch(
+                prefix_indices=torch.empty(0, dtype=torch.int64),
+                l2_host_hit_length=0,
+                l3_storage_hit_length=64,
+                last_device_node=tree_cache.root_node,
+            ),
+            hicache_restore_status=HiCacheRestoreResult.PENDING,
+        )
+
+        queued = DecodeHiCacheTransferMixin._try_hicache_queue_load_back(
+            harness, decode_req
+        )
+
+        self.assertFalse(queued)
+        self.assertEqual(decode_req.hicache_restore_status, HiCacheRestoreResult.PENDING)
+        tree_cache.pop_prefetch_loaded_tokens.assert_not_called()
+        tree_cache.init_load_back.assert_not_called()
+
+    @patch("sglang.srt.disaggregation.decode_hicache_mixin.match_prefix_for_req")
+    def test_l3_only_restore_queues_complete_coverage(self, match_prefix):
+        tree_cache = MagicMock()
+        tree_cache.check_prefetch_progress.return_value = True
+        restored_indices = torch.arange(100, 164, dtype=torch.int64)
+        restored_node = object()
+        lock_receipt = object()
+        tree_cache.init_load_back.return_value = (restored_indices, restored_node)
+        tree_cache.inc_lock_ref.return_value.to_dec_params.return_value = lock_receipt
+        match_prefix.return_value = SimpleNamespace(
+            device_indices=torch.empty(0, dtype=torch.int64),
+            best_match_node=tree_cache.root_node,
+            host_hit_length=64,
+        )
+        req = SimpleNamespace(
+            rid="req-restart",
+            origin_input_ids=list(range(64)),
+            last_node=tree_cache.root_node,
+        )
+        decode_req = SimpleNamespace(
+            req=req,
+            prefix_match=DecodePrefixMatch(
+                prefix_indices=torch.empty(0, dtype=torch.int64),
+                l2_host_hit_length=0,
+                l3_storage_hit_length=64,
+                last_device_node=tree_cache.root_node,
+            ),
+            hicache_restore_status=HiCacheRestoreResult.PENDING,
+        )
+        harness = SimpleNamespace(tree_cache=tree_cache)
+
+        queued = DecodeHiCacheTransferMixin._try_hicache_queue_load_back(
+            harness, decode_req
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(decode_req.hicache_restore_status, HiCacheRestoreResult.PENDING)
+        torch.testing.assert_close(
+            decode_req.hicache_restored_kv_indices, restored_indices
+        )
+        self.assertIs(decode_req.hicache_restored_node, restored_node)
+        self.assertIs(decode_req.hicache_restore_lock_receipt, lock_receipt)
+        tree_cache.pop_prefetch_loaded_tokens.assert_called_once_with("req-restart")
+
+    def test_transfer_success_is_gated_until_l3_restore_is_ready(self):
+        receiver = MagicMock()
+        receiver.poll.return_value = KVPoll.Success
+        decode_req = SimpleNamespace(
+            kv_receiver=receiver,
+            hicache_restore_status=HiCacheRestoreResult.PENDING,
+        )
+        gated = HiCacheRestoreGatedKVReceiver(decode_req)
+
+        self.assertEqual(gated.poll(), KVPoll.Transferring)
+        decode_req.hicache_restore_status = HiCacheRestoreResult.READY
+        self.assertEqual(gated.poll(), KVPoll.Success)
 
 
 if __name__ == "__main__":
