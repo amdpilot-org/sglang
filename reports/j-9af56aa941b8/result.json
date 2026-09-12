@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35433",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1486",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1451",
+  "candidate_commit": "7a71a1546b5b27eb420f37fe167ecbe2d76919d4",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly rejects the reported non-leading trailing system message with ValueError, which the serving base maps to HTTP 400 before tokenization or inference. However, a system-only request remains accepted and renders without an assistant generation boundary, preserving the malformed-prompt behavior for a final role=system boundary case. The change is therefore a partial fix, not a full resolution of the original contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af56aa941b8/venv/bin/python /job/review_cases.py (base checkout)",
+      "exit_code": 0,
+      "what_was_measured": "The exact reported tool-call/system-tail case was accepted without an assistant boundary; changing only the tail to user produced <｜Assistant｜><think>."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af56aa941b8/venv/bin/python /job/review_cases.py (candidate 7a71a154...)",
+      "exit_code": 0,
+      "what_was_measured": "The reported non-leading system tail and context-crossing system tail were rejected. Valid user-tail and leading-system-plus-user cases retained generation boundaries. A system-only request was still accepted without a generation boundary."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af56aa941b8/venv/bin/python test/registered/unit/entrypoints/openai/test_serving_chat.py -k dsv4 -v",
+      "exit_code": 0,
+      "what_was_measured": "Candidate focused DSV4 regression suite: 10 tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af56aa941b8/venv/bin/python -m py_compile python/sglang/srt/entrypoints/openai/encoding_dsv4.py test/registered/unit/entrypoints/openai/test_serving_chat.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9af56aa941b8/venv/bin/python GPU availability and tensor sum probe",
+      "exit_code": 0,
+      "what_was_measured": "One AMD Instinct MI355X (gfx950) was visible and computed a tensor sum of 6.0; this does not validate DeepSeek-V4 model semantics."
+    }
+  ],
+  "gpu_execution": false,
+  "gpu_evidence": "The encoder/order validation is deterministic CPU-side pre-inference logic. A separate environment probe confirmed one MI355X/gfx950 GPU, but no candidate validation required GPU execution and no DeepSeek-V4 weights were present.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "[{\"role\": \"system\", \"content\": \"a\"}] is accepted by encode_messages(thinking_mode=\"thinking\") and renders '<｜begin▁of▁sentence｜>a' with no '<｜Assistant｜><think>' boundary. In the OpenAI serving path this system-first request is not normalized and can still proceed to tokenizer/model execution."
+  ],
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash-0731 weights were unavailable, so the reported long-context first-token EOS behavior and model output were not replayed.",
+    "No full HTTP server was launched; HTTP 400 behavior for the candidate's ValueError was verified from the actual serving call path and exception mapping, while encoder behavior was executed directly.",
+    "The assigned hardware was one AMD Instinct MI355X/gfx950, not the multi-GPU topology required by repository DeepSeek-V4 serving recipes.",
+    "No native source changed, so no native rebuild was applicable."
+  ]
+}
