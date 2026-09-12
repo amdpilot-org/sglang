@@ -130,15 +130,17 @@ export const KimiK3MambaRatioCalculator = () => {
     // max_running_requests is divided by attention DP before it sizes plain
     // spec scratch. Model the requested global target conservatively with ceil.
     const concurrencyPerDp = Math.ceil(target / dp);
-    // KDA keeps dense conv intermediates, so one draft step has the same byte
-    // geometry as one main state slot. It is nevertheless a separate
-    // request-indexed buffer, with one padding request row.
-    const fixedSpecBytes = drafts > 0
-      ? (concurrencyPerDp + 1) * drafts * stateBytesPerSlot
-      : 0;
-    const mainStateBytes = (concurrencyPerDp * slots + 2) * stateBytesPerSlot;
+    // Invert kv_cache_configurator.py's joint solve exactly. The configurator
+    // models plain-spec scratch as D/S slot-equivalents per usable slot, plus
+    // one padding row for both the main and intermediate buffers. Use that
+    // modeled geometry here even when the allocator's physical conv scratch is
+    // smaller: the CLI ratio is consumed by this solve before allocation.
+    const safeSlots = concurrencyPerDp * slots + 1;
+    const modeledMambaBudgetBytes = stateBytesPerSlot * (
+      safeSlots * (1 + drafts / slots) + 1 + drafts
+    );
     const kvBudgetBytes = concurrencyPerDp * length * kvBytesPerTokenPerRank;
-    const ratio = (mainStateBytes + fixedSpecBytes) / kvBudgetBytes;
+    const ratio = modeledMambaBudgetBytes / kvBudgetBytes;
     return { ratio, tp, dp, attnTp, dcp, kvDtype, ssmDtype, radixOff, strategy, skipLock, slots, specOn, replaySpec, block, pdRole };
   };
 

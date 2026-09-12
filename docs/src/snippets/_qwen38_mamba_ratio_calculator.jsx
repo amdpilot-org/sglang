@@ -162,20 +162,17 @@ export const Qwen38MambaRatioCalculator = () => {
     const kvBytesPerToken = 16 * 4 * 256 * 2 * kvBytes;
 
     const concurrency = Math.ceil(C);
-    // Plain spec scratch is request-indexed, outside the slot allocator. Qwen's
-    // CUDA linear-chain path stores D temporal snapshots plus one deduplicated
-    // conv window of width D + K - 2 for each of C + 1 request rows.
-    const ssmStateBytes = 48 * 48 * 128 * 128 * ssmBytes;
-    const convIntermediateBytes = 48 * 10240 * (drafts + 2) * 2;
-    const fixedSpecBytes = drafts > 0
-      ? (concurrency + 1) * (drafts * ssmStateBytes + convIntermediateBytes)
-      : 0;
-    // K has one usable donation margin; the backing tensor has another dummy
-    // row at index 0. Both consume bytes, but only the first prevents the stash
-    // allocation failure.
-    const mainStateBytes = (concurrency * slots + 2) * stateBytesPerSlot;
+    // Invert kv_cache_configurator.py's joint solve exactly. It models plain-
+    // spec scratch as D/S slot-equivalents per usable slot, plus one padding
+    // row for both buffers. The allocator's CUDA conv-window deduplication can
+    // make physical scratch smaller, but substituting that geometry here does
+    // not invert the configurator and can floor K below the safe minimum.
+    const safeSlots = concurrency * slots + 1;
+    const modeledMambaBudgetBytes = stateBytesPerSlot * (
+      safeSlots * (1 + drafts / slots) + 1 + drafts
+    );
     const kvBudgetBytes = concurrency * L * kvBytesPerToken;
-    const ratio = (mainStateBytes + fixedSpecBytes) / kvBudgetBytes;
+    const ratio = modeledMambaBudgetBytes / kvBudgetBytes;
     return { ratio, tp, kvDtype, ssmDtype, radixOff, strategy, slots, specOn,
              drafts, stateBytesPerSlot, kvBytesPerToken };
   };
@@ -327,7 +324,7 @@ export const Qwen38MambaRatioCalculator = () => {
             style={inputStyle}
           />
           <span style={{ color: colors.muted, fontSize: "11px", fontWeight: 400 }}>
-            Requests in flight — sizes the explicit pin, not the ratio
+            Requests in flight — sizes both the safe ratio and explicit pin
           </span>
         </label>
 

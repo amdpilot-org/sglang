@@ -94,17 +94,17 @@ def variable_pool_ratio(L, state_bytes_per_slot, kv_bytes_per_token, S, dcp_size
     token_equiv = state_bytes_per_slot / kv_bytes_per_token
     return S * token_equiv * dcp_size / L
 
-def cli_ratio(rest_bytes, fixed_spec_bytes, variable_ratio):
-    # The CLI ratio includes the fixed scratch inside the mamba-side budget.
-    variable_rest = rest_bytes - fixed_spec_bytes
-    assert variable_rest > 0
-    kv_budget = variable_rest / (1 + variable_ratio)
-    return variable_ratio + fixed_spec_bytes / kv_budget
+def cli_ratio_for_target(C, L, state_bytes_per_slot, kv_bytes_per_token, S, D=0):
+    # Exact inverse of the current configurator's plain-spec joint solve.
+    # C is per attention-DP rank and K includes one usable donation slot.
+    K = C * S + 1
+    modeled_mamba_budget = state_bytes_per_slot * (K * (1 + D / S) + 1 + D)
+    kv_budget = C * L * kv_bytes_per_token
+    return modeled_mamba_budget / kv_budget
 
-def predict_clamp(rest_bytes, r, state_bytes_per_slot, S, fixed_spec_bytes=0):
-    mamba_budget = rest_bytes * r / (1 + r) - fixed_spec_bytes
-    slots = mamba_budget / state_bytes_per_slot
-    return int(slots // S)
+def predict_ratio_solved_slots(mamba_budget_bytes, state_bytes_per_slot, S, D=0):
+    budget_in_slots = mamba_budget_bytes / state_bytes_per_slot
+    return int((budget_in_slots - (1 + D)) // (1 + D / S))
 
 def safe_pin(target_concurrency_per_attention_dp, S):
     # One usable donation slot is needed before the old chunk state is freed.
@@ -121,11 +121,13 @@ Then state the result three ways: the **`r` value**, the **predicted clamp** (if
 
 1. **Free lever first**: if the boot log shows large idle in `Memory pool end. avail mem` (e.g. 30–40 GB at mem-frac 0.85), raise `--mem-fraction-static` (→0.92) before touching the split — it grows `rest` for both pools at no cost. Validate graph-capture headroom once.
 2. Collect the inputs. Prefer a real boot log for the two byte constants.
-3. Compute `r_variable`. For plain spec, deduct the separately allocated
-   intermediate buffers from `rest` and translate to the CLI ratio with
-   `cli_ratio`; this makes the result depend on `max_running_requests`. If the
-   required inputs are unavailable, report the variable-pool ratio and say that
-   the final CLI ratio must be verified from a boot log.
+3. Compute `r_variable`. For a plain-spec CLI ratio, invert the configurator's
+   joint solve with `cli_ratio_for_target`; this makes the result depend on the
+   target concurrency (and therefore the intended `max_running_requests`). The
+   configurator models scratch as `D` full-slot equivalents per request even
+   when the allocator's physical conv-window geometry is smaller. Use physical
+   boot-log bytes to audit actual VRAM, but do not substitute them into the CLI
+   inverse. Verify the resulting slot count after boot.
 4. If the ratio would drive the state pool below one request's worth, **switch
    to pinning `--max-mamba-cache-size = target_concurrency_per_attention_dp · S + 1`**.
    The `+1` is a usable transient stash slot.
