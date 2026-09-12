@@ -1,6 +1,7 @@
 import logging
+import os
 
-from sglang.srt.environ import envs
+from sglang.srt.environ import deep_gemm_cache_dir, envs
 from sglang.srt.runtime_context import get_platform
 from sglang.srt.utils import (
     get_device_sm,
@@ -12,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 _is_cuda = is_cuda()
 _is_musa = is_musa()
+
+# DeepGEMM resolves its JIT cache during import. Configure the native variable
+# before _compute_enable_deep_gemm probes the package on supported platforms.
+os.environ["DG_JIT_CACHE_DIR"] = deep_gemm_cache_dir()
 
 
 def _compute_enable_deep_gemm():
