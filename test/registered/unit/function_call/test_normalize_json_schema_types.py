@@ -345,6 +345,52 @@ class TestNormalizeJsonSchemaTypes(CustomTestCase):
         normalize_json_schema_types(schema)
         self.assertEqual(schema, once)
 
+    def test_null_required_is_omitted(self):
+        schema = {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": None,
+        }
+        normalize_json_schema_types(schema)
+        self.assertNotIn("required", schema)
+        self._assert_accepts(schema)
+
+    def test_null_required_is_omitted_in_nested_schema(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "properties": {"city": {"type": "varchar"}},
+                    "required": None,
+                }
+            },
+        }
+        normalize_json_schema_types(schema)
+        location = schema["properties"]["location"]
+        self.assertNotIn("required", location)
+        self.assertEqual(location["properties"]["city"]["type"], "string")
+        self._assert_accepts(schema)
+
+    def test_valid_required_is_preserved(self):
+        schema = {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        }
+        normalize_json_schema_types(schema)
+        self.assertEqual(schema["required"], ["city"])
+        self._assert_accepts(schema)
+
+    def test_other_invalid_required_values_are_preserved(self):
+        for invalid in (False, "city", {"city": True}):
+            with self.subTest(invalid=invalid):
+                schema = {"type": "object", "required": invalid}
+                normalize_json_schema_types(schema)
+                self.assertEqual(schema["required"], invalid)
+                with self.assertRaises(SchemaError):
+                    self._assert_accepts(schema)
+
     def test_non_string_type_values_pass_through(self):
         """``type`` that isn't str/list is left for the real validator to reject."""
         for bad in (None, 42, {"$ref": "#/$defs/Foo"}, ["string", 1, None]):

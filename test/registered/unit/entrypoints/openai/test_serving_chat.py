@@ -594,6 +594,28 @@ class ServingChatTestCase(unittest.TestCase):
             "return_sampling_mask requires return_meta_info=true.",
         )
 
+    def test_validate_request_accepts_null_required_tool_schema(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "What is the weather?"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": None,
+                        },
+                    },
+                }
+            ],
+        )
+
+        self.assertIsNone(self.chat._validate_request(req))
+        self.assertNotIn("required", req.tools[0].function.parameters)
+
     def test_convert_to_internal_request_rejects_stream_return_meta_info(self):
         req = ChatCompletionRequest(
             model="x",

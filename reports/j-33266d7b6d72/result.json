@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35242",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the reported Draft 2020-12 validation failure for a tool parameters schema containing required: null, then narrowly normalized that null sentinel to an omitted required keyword. The serving request validation regression and independent nested, valid-array, and malformed-non-null boundary cases pass. Upstream PR https://github.com/sgl-project/sglang/pull/35631 independently proposes a related broader change and was reviewed before implementation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-33266d7b6d72/venv/bin/python < inline failing-before schema reproducer",
+      "exit_code": 1,
+      "what_was_measured": "The prepared source left required: null unchanged and jsonschema raised the issue's exact None is not of type 'array' SchemaError. Raw output: reports/j-33266d7b6d72/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33266d7b6d72/venv/bin/python -m pytest test/registered/unit/function_call/test_normalize_json_schema_types.py -q",
+      "exit_code": 0,
+      "what_was_measured": "27 normalization tests and 3 malformed-required subtests passed, covering the regression, nested schemas, valid required arrays, and invalid non-null values that must remain rejected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33266d7b6d72/venv/bin/python -m pytest test/registered/unit/entrypoints/openai/test_serving_chat.py::ServingChatTestCase::test_validate_request_accepts_null_required_tool_schema -q",
+      "exit_code": 0,
+      "what_was_measured": "The actual OpenAIServingChat request validator accepts the reported schema shape and removes the null required sentinel before Draft 2020-12 validation."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-33266d7b6d72/venv/bin/python < inline passing-after schema reproducer",
+      "exit_code": 0,
+      "what_was_measured": "The identical issue-shaped schema normalized to an object without required and passed Draft 2020-12 schema validation. Raw output: reports/j-33266d7b6d72/raw/passing-after.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned GPU was inventoried as one AMD Instinct MI350X, gfx950 (reports/j-33266d7b6d72/raw/gpu-inventory.txt), but this defect occurs entirely in CPU-side HTTP request schema validation. No inference execution was used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported Qwen3.8-27B-FP8 weights and complete original request payload were not available, so no full-model or semantic tool-call reproduction is claimed.",
+    "The attached upstream server log confirms the Qwen3.8 server configuration and a 400 response but does not log the request body; the issue text supplies the exact validator error.",
+    "No native code changed, so no native rebuild was applicable.",
+    "The open upstream PR #35631 also normalizes properties: null; that neighboring behavior was not included because issue #35242 specifically demonstrates required: null."
+  ]
+}
