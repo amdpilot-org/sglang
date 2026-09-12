@@ -79,6 +79,12 @@ from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.post_training.gpu_worker_post_training_mixin import (
     GPUWorkerPostTrainingMixin,
 )
+from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutDebugTensors,
+    RolloutDenoisingEnv,
+    RolloutDitTrajectory,
+    RolloutTrajectoryData,
+)
 from sglang.multimodal_gen.runtime.realtime.session import RealtimeSessionCache
 from sglang.multimodal_gen.runtime.realtime.video import (
     RAW_RGB_CONTENT_TYPE,
@@ -117,6 +123,118 @@ class _ExpandedOutputParts:
     output_file_paths: list[str] = field(default_factory=list)
     metrics_list: list[Any] = field(default_factory=list)
     trajectory_decoded_parts: list[list[torch.Tensor]] | None = None
+    rollout_trajectory_data: list[RolloutTrajectoryData | None] = field(
+        default_factory=list
+    )
+
+
+def _cat_per_output(tensors: list[torch.Tensor | None]) -> torch.Tensor | None:
+    if not tensors or any(tensor is None for tensor in tensors):
+        return None
+    return torch.cat(tensors, dim=0)
+
+
+def _concat_denoising_env_value(
+    values: list[Any], *, current_key: str | None = None
+) -> Any:
+    """Combine singleton-batch values while leaving shared metadata unchanged."""
+    first = values[0]
+    if all(isinstance(value, torch.Tensor) for value in values):
+        if all(value.dim() >= 1 and value.shape[0] == 1 for value in values):
+            return torch.cat(values, dim=0)
+        return first
+    if all(isinstance(value, dict) and value.keys() == first.keys() for value in values):
+        return {
+            key: _concat_denoising_env_value(
+                [value[key] for value in values], current_key=key
+            )
+            for key in first
+        }
+    if all(isinstance(value, list) for value in values):
+        if current_key == "img_shapes" and all(len(value) == 1 for value in values):
+            return [item for value in values for item in value]
+        if all(len(value) == len(first) for value in values):
+            return [
+                _concat_denoising_env_value([value[i] for value in values])
+                for i in range(len(first))
+            ]
+    if all(isinstance(value, tuple) and len(value) == len(first) for value in values):
+        return tuple(
+            _concat_denoising_env_value([value[i] for value in values])
+            for i in range(len(first))
+        )
+    return first
+
+
+def _concat_denoising_envs(
+    per_output: list[RolloutTrajectoryData],
+) -> RolloutDenoisingEnv | None:
+    if not all(data.denoising_env is not None for data in per_output):
+        return None
+    envs: list[RolloutDenoisingEnv] = [
+        data.denoising_env
+        for data in per_output
+        if data.denoising_env is not None
+    ]
+    return RolloutDenoisingEnv(
+        image_kwargs=_concat_denoising_env_value([env.image_kwargs for env in envs]),
+        pos_cond_kwargs=_concat_denoising_env_value(
+            [env.pos_cond_kwargs for env in envs]
+        ),
+        neg_cond_kwargs=_concat_denoising_env_value(
+            [env.neg_cond_kwargs for env in envs]
+        ),
+        guidance=_concat_denoising_env_value([env.guidance for env in envs]),
+    )
+
+
+def _concat_rollout_trajectory_data(
+    per_output: list[RolloutTrajectoryData | None],
+) -> RolloutTrajectoryData | None:
+    """Merge aligned per-output trajectories along their batch dimension."""
+    if not per_output or any(data is None for data in per_output):
+        return None
+
+    first = per_output[0]
+    if len(per_output) == 1:
+        return first
+
+    debug_tensors = None
+    if all(data.rollout_debug_tensors is not None for data in per_output):
+        debug = [data.rollout_debug_tensors for data in per_output]
+        debug_tensors = RolloutDebugTensors(
+            rollout_variance_noises=_cat_per_output(
+                [entry.rollout_variance_noises for entry in debug]
+            ),
+            rollout_prev_sample_means=_cat_per_output(
+                [entry.rollout_prev_sample_means for entry in debug]
+            ),
+            rollout_noise_std_devs=_cat_per_output(
+                [entry.rollout_noise_std_devs for entry in debug]
+            ),
+            rollout_model_outputs=_cat_per_output(
+                [entry.rollout_model_outputs for entry in debug]
+            ),
+        )
+
+    dit_trajectory = None
+    if all(data.dit_trajectory is not None for data in per_output):
+        dit_trajectory = RolloutDitTrajectory(
+            latents=_cat_per_output(
+                [data.dit_trajectory.latents for data in per_output]
+            ),
+            timesteps=first.dit_trajectory.timesteps,
+            sigmas=first.dit_trajectory.sigmas,
+        )
+
+    return RolloutTrajectoryData(
+        rollout_log_probs=_cat_per_output(
+            [data.rollout_log_probs for data in per_output]
+        ),
+        rollout_debug_tensors=debug_tensors,
+        denoising_env=_concat_denoising_envs(per_output),
+        dit_trajectory=dit_trajectory,
+    )
 
 
 def _worker_cpu_intra_op_threads(num_gpus: int) -> int | None:
@@ -1323,11 +1441,6 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
             and output_batch.trajectory_timesteps is not None
         ):
             merged.trajectory_timesteps = output_batch.trajectory_timesteps
-        if (
-            merged.rollout_trajectory_data is None
-            and output_batch.rollout_trajectory_data is not None
-        ):
-            merged.rollout_trajectory_data = output_batch.rollout_trajectory_data
 
     @staticmethod
     def _collect_expanded_parts(
@@ -1347,6 +1460,7 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
             parts.trajectory_latents.append(output_batch.trajectory_latents)
         if isinstance(output_batch.noise_pred, torch.Tensor):
             parts.noise_preds.append(output_batch.noise_pred)
+        parts.rollout_trajectory_data.append(output_batch.rollout_trajectory_data)
         if output_batch.trajectory_decoded:
             GPUWorker._collect_trajectory_decoded(
                 parts, output_batch.trajectory_decoded
@@ -1396,6 +1510,10 @@ class GPUWorker(GPUWorkerPostTrainingMixin):
                 torch.cat(decoded_step, dim=0)
                 for decoded_step in parts.trajectory_decoded_parts
             ]
+        if any(data is not None for data in parts.rollout_trajectory_data):
+            merged.rollout_trajectory_data = _concat_rollout_trajectory_data(
+                parts.rollout_trajectory_data
+            )
 
     def get_can_stay_resident_components(
         self, remaining_gpu_mem_gb: float

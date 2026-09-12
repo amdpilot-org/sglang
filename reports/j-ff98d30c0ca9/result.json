@@ -1,0 +1,37 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34000",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced and fixed rollout trajectory collapse and skipped preparation for caller-provided raw latents. The grouped-forward residency-manager defect was already fixed at the prepared base and is covered by a passing regression.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ff98d30c0ca9/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_multi_output_rollout_trajectory.py python/sglang/multimodal_gen/test/unit/test_provided_latents_preparation.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: merged rollout shape was [1,4] instead of [3,4], partial trajectories were retained, and provided raw latents lacked latent_ids and packing. Log: reports/j-ff98d30c0ca9/raw/failing-before.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ff98d30c0ca9/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_multi_output_rollout_trajectory.py python/sglang/multimodal_gen/test/unit/test_provided_latents_preparation.py python/sglang/multimodal_gen/test/unit/test_pipeline_residency_manager_install.py python/sglang/multimodal_gen/test/unit/test_rollout_api.py python/sglang/multimodal_gen/test/unit/test_pipeline_executor.py python/sglang/multimodal_gen/test/unit/test_performance_metrics.py",
+      "exit_code": 0,
+      "what_was_measured": "73 passing regression and adjacent unit tests, including incomplete/single-output trajectory boundaries, already-packed latent passthrough, and the already-fixed grouped residency-manager installation. Log: reports/j-ff98d30c0ca9/raw/final-unit-tests.log"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files <six changed Python files>",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, spelling, and policy hooks for all changed Python files."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ff98d30c0ca9/venv/bin/python - <<'PY' # merge three tagged GPU trajectories and compare with independent CPU tensors",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI355X gfx950, merged log_probs had shape [3,4] and tags [1.25,-2.5,7.75], merged latents had shape [3,5,2], and both matched CPU references at rtol=0, atol=0. Log: reports/j-ff98d30c0ca9/raw/gfx950-numerical-check.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "reports/j-ff98d30c0ca9/raw/gfx950-numerical-check.log records AMD Instinct MI355X, gfx950:sramecc+:xnack-, Torch 2.11.0+rocm7.2, HIP 7.2.26015, and exact CPU-reference agreement.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No SD3 or FLUX.2 model weights were available, so no full diffusion server or model-architecture reproduction was run.",
+    "The GPU fixture validates tensor merge execution only; it does not validate semantic image accuracy or GRPO training convergence.",
+    "No distributed or multi-node workload was exercised.",
+    "Bug 2 was not reproduced because the prepared base already installs the residency manager on grouped forward; its current behavior is protected by a regression test."
+  ]
+}
