@@ -1,0 +1,57 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34631",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1649",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1611",
+  "candidate_commit": "5478c5bd3941700593977490de41c1e4d177e9cf",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate corrects the reported Muse grammar arming boundary in failing-before/passing-after and adversarial state-machine tests, but its per-token rollback snapshots copy the complete reasoning history and cause quadratic retained memory, so changes are requested before acceptance.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-939314165107/venv/bin/python /job/review_repro_34631.py (base)",
+      "exit_code": 0,
+      "what_was_measured": "Imported the prepared checkout source and reproduced masking at position 6 versus answer-body position 11; the grammar accepted the five header tokens plus body."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-939314165107/venv/bin/python /job/review_repro_34631.py (candidate 5478c5bd3941700593977490de41c1e4d177e9cf)",
+      "exit_code": 0,
+      "what_was_measured": "Masking began at answer-body position 11 and only body tokens were accepted by the inner grammar."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-939314165107/venv/bin/python -m pytest -q test/registered/unit/constrained/test_reasoner_grammar_backend.py test/registered/unit/parser/test_reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and related parser/constrained behavior: 153 passed, 64 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-939314165107/venv/bin/python /job/review_adversarial_34631.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent boundary, repeated-reasoning, rollback/replay, copy-adjacent state, cap, no-reasoning, and detector opt-in contracts passed; also measured 4,002,000 copied history slots and 32,144,000 bytes of answer-snapshot lists for a 2,000+2,000 token stream."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-939314165107/venv/bin/python -m compileall -q python/sglang/srt/constrained/reasoner_grammar_backend.py python/sglang/srt/environ.py python/sglang/srt/parser/reasoning_parser.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiled successfully."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..5478c5bd3941700593977490de41c1e4d177e9cf --check",
+      "exit_code": 0,
+      "what_was_measured": "Candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "One AMD Instinct MI355X gfx950 was visible through Torch 2.11.0+rocm7.2, but the reviewed defect is CPU-side grammar state and no GPU kernel or model inference was run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A 2,000-token reasoning prefix plus 2,000 answer tokens retains 4,002,000 copied reasoning-history slots (32,144,000 bytes in copied list storage alone), demonstrating quadratic per-request memory growth in the candidate rollback snapshots."
+  ],
+  "remaining_limitations": [
+    "Muse Glimmer 30B NVFP4 weights were unavailable, so production placeholder frequency, semantic quality, and full HTTP serving were not reproduced.",
+    "GPT-OSS channel framing was not verified.",
+    "No GPU execution was relevant to or used for this Python state-machine review.",
+    "No native files changed; a native rebuild was not applicable."
+  ]
+}
