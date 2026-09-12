@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37368",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced deterministic corruption when RunAI-marked reusable-buffer views were retained by the NVFP4 online MoE loader, then cloned only marked tensors at the three pending-storage sites: FP8 weights, FP8 scales, and gated w1/w3 weights. Added routed-expert, shared-expert, scale-first, gated-pair, and unmarked-tensor coverage.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-b64a0a9c43ea/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_nvfp4_online_runai_ownership.py",
+      "exit_code": 1,
+      "what_was_measured": "Before the source fix, the synthetic reusable staging buffer deterministically overwrote all three retained RunAI-marked tensor cases; 3 tests failed and the unmarked boundary test passed. Raw output: reports/j-b64a0a9c43ea/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b64a0a9c43ea/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_nvfp4_online_runai_ownership.py test/registered/unit/layers/quantization/test_modelopt_nvfp4.py",
+      "exit_code": 0,
+      "what_was_measured": "After the fix and formatting, 11 focused and neighboring unit tests passed, including routed expert weight-first, scale-first, shared expert, gated w1/w3, and unmarked reference-semantics cases. Raw output: reports/j-b64a0a9c43ea/final-tests.txt"
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/layers/quantization/nvfp4_online.py test/registered/unit/layers/quantization/test_nvfp4_online_runai_ownership.py",
+      "exit_code": 0,
+      "what_was_measured": "All repository pre-commit checks applicable to the changed Python files passed. Raw output: reports/j-b64a0a9c43ea/pre-commit-after-format.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-b64a0a9c43ea/venv/bin/python -c 'import torch; ...'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed the assigned device is one AMD Instinct MI350X with gfx950. This was environment evidence only; the reported reusable RunAI staging-buffer lifetime defect occurs on CPU-hosted streamed views and does not require GPU execution. Raw output: reports/j-b64a0a9c43ea/gpu-environment.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The assigned single gfx950 GPU was detected, but no GPU kernel was used as evidence for this host-buffer ownership defect. The production NVFP4 workload described by the issue targets a different hardware/backend stack and no FP8-MoE checkpoint or distributed RunAI deployment was available."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full FP8 MoE checkpoint was available, so full-model semantic output was not evaluated.",
+    "No distributed Kubernetes/RunAI Model Streamer deployment or tensor-parallel size 8 environment was available.",
+    "The assigned gfx950 device cannot qualify the production NVIDIA NVFP4 execution backend; validation is limited to the reported loader ownership contract with deterministic reusable-buffer views.",
+    "No native C++ or FlyDSL source changed, so a native rebuild was not applicable."
+  ]
+}

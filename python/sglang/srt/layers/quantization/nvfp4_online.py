@@ -29,6 +29,17 @@ from sglang.srt.layers.quantization.utils import (
 
 logger = logging.getLogger(__name__)
 
+# Kept local to avoid importing model_loader while quantization's package
+# initializer is still running.
+RUNAI_STREAMER_TENSOR_ATTR = "_sglang_runai_streamer_tensor"
+
+
+def _clone_if_runai_streamed_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """Take ownership before retaining a view into RunAI's reusable buffer."""
+    if getattr(tensor, RUNAI_STREAMER_TENSOR_ATTR, False):
+        return tensor.clone().detach()
+    return tensor
+
 
 class NvFp4OnlineConfig(ModelOptQuantConfig):
     """Load-time NVFP4 with online per-token FP32 activation scales.
@@ -493,7 +504,7 @@ class ModelOptNvFp4OnlineFusedMoEMethod(ModelOptNvFp4FusedMoEMethod):
             pending_key = expert_id
             current = (
                 param,
-                loaded_weight,
+                _clone_if_runai_streamed_tensor(loaded_weight),
                 weight_name,
                 shard_id,
                 expert_id,
@@ -575,7 +586,7 @@ class ModelOptNvFp4OnlineFusedMoEMethod(ModelOptNvFp4FusedMoEMethod):
                 if weight_scale is None:
                     pending_fp8_weights[key] = (
                         param,
-                        loaded_weight,
+                        _clone_if_runai_streamed_tensor(loaded_weight),
                         weight_name,
                         shard_id,
                         expert_id,
@@ -597,7 +608,9 @@ class ModelOptNvFp4OnlineFusedMoEMethod(ModelOptNvFp4FusedMoEMethod):
             with pending_fp8_lock:
                 pending = pending_fp8_weights.pop(key, None)
                 if pending is None:
-                    pending_fp8_weight_scales[key] = loaded_weight
+                    pending_fp8_weight_scales[key] = _clone_if_runai_streamed_tensor(
+                        loaded_weight
+                    )
                     return
 
             log_quantization_start()
