@@ -1,0 +1,227 @@
+.....FF......                                                         [100%]
+=================================== FAILURES ===================================
+__________________ TestTritonAttention.test_extend_attention ___________________
+
+self = <test_triton_attention_kernels.TestTritonAttention testMethod=test_extend_attention>
+
+    def test_extend_attention(self):
+    
+        # Define the varying parameter values
+        # 256 covers the head_dim > 128 block-size branch (tuned on gfx95)
+        attention_values = [256, 128, 96, 80, 13]
+    
+        # Loop through the values and call the method
+        for value in attention_values:
+>           self._test_extend_attention_once(19, 12331, 12, 4, value)
+
+test/registered/attention/test_triton_attention_kernels.py:330: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/attention/test_triton_attention_kernels.py:317: in _test_extend_attention_once
+    self.assertTrue(torch.allclose(o_extend, o_redundant, rtol=1e-2, atol=1e-3))
+E   AssertionError: False is not true
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7667ed1a9300>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7670d0bf5c60>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/attention/test_triton_attention_kernels.py", line 330, in test_extend_attention
+    self._test_extend_attention_once(19, 12331, 12, 4, value)
+  File "/job/repo/test/registered/attention/test_triton_attention_kernels.py", line 317, in _test_extend_attention_once
+    self.assertTrue(torch.allclose(o_extend, o_redundant, rtol=1e-2, atol=1e-3))
+  File "/usr/lib/python3.12/unittest/case.py", line 727, in assertTrue
+    raise self.failureException(msg)
+AssertionError: False is not true
+____________ TestTritonAttention.test_extend_attention_block_sizes _____________
+
+self = <test_triton_attention_kernels.TestTritonAttention testMethod=test_extend_attention_block_sizes>
+
+    def test_extend_attention_block_sizes(self):
+        from sglang.kernels.ops.attention import extend_attention as ea
+    
+        if not ea._is_hip:
+            self.skipTest("HIP-only block-size selection")
+        # head_dim <= 256: tuned tile on gfx95, default elsewhere. 64 is gpt-oss,
+        # 128 is the llama/qwen family, 256 is gemma -- all measured on MI350X.
+        expected = (128, 64, 8) if ea._is_gfx95 else (64, 64, 4)
+        for head_dim in (64, 128, 256):
+>           self.assertEqual(
+                ea._get_block_sizes_for_extend_attention(head_dim, head_dim)[3:],
+                expected,
+            )
+E           AssertionError: Tuples differ: (64, 64, 4) != (128, 64, 8)
+E           
+E           First differing element 0:
+E           64
+E           128
+E           
+E           - (64, 64, 4)
+E           + (128, 64, 8)
+
+test/registered/attention/test_triton_attention_kernels.py:478: AssertionError
+
+During handling of the above exception, another exception occurred:
+python/sglang/test/test_utils.py:2194: in _callTestMethod
+    retry(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fn = <function CustomTestCase._callTestMethod.<locals>.<lambda> at 0x7667e1d2c220>
+max_retry = 0, initial_delay = 2.0, max_delay = 60.0
+should_retry = <function <lambda> at 0x7670d0bf5c60>
+
+    def retry(
+        fn,
+        max_retry: int,
+        initial_delay: float = 2.0,
+        max_delay: float = 60.0,
+        should_retry: Callable[[Any], bool] = lambda e: True,
+    ):
+        for try_index in itertools.count():
+            try:
+                return fn()
+            except SkipTest:
+                # Do NOT retry skipped tests - used in CI and unittest
+                raise
+            except _ShouldStop:
+                # `unittest.case._ShouldStop` is raised by `subTest.__exit__`
+                # when a subtest fails/skips and `result.failfast` is True
+                # (CI invokes `python3 file.py -f`). It signals the outer
+                # `testPartExecutor` to stop the test method cleanly; do
+                # NOT retry, just propagate so unittest handles it.
+                raise
+            except Exception as e:
+                traceback.print_exc()
+    
+                if try_index >= max_retry:
+>                   raise Exception(f"retry() exceed maximum number of retries.")
+E                   Exception: retry() exceed maximum number of retries.
+
+python/sglang/srt/utils/common.py:3529: Exception
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/job/repo/python/sglang/srt/utils/common.py", line 3514, in retry
+    return fn()
+           ^^^^
+  File "/job/repo/python/sglang/test/test_utils.py", line 2195, in <lambda>
+    lambda: super(CustomTestCase, self)._callTestMethod(method),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/job/repo/test/registered/attention/test_triton_attention_kernels.py", line 478, in test_extend_attention_block_sizes
+    self.assertEqual(
+  File "/usr/lib/python3.12/unittest/case.py", line 885, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 1102, in assertTupleEqual
+    self.assertSequenceEqual(tuple1, tuple2, msg, seq_type=tuple)
+  File "/usr/lib/python3.12/unittest/case.py", line 1073, in assertSequenceEqual
+    self.fail(msg)
+  File "/usr/lib/python3.12/unittest/case.py", line 715, in fail
+    raise self.failureException(msg)
+AssertionError: Tuples differ: (64, 64, 4) != (128, 64, 8)
+
+First differing element 0:
+64
+128
+
+- (64, 64, 4)
++ (128, 64, 8)
+_ TestTritonAttention.test_extend_attention_unified_vs_regular (B=8, N_CTX=256, H_Q=64, H_KV=8, D=80) _
+
+self = <test_triton_attention_kernels.TestTritonAttention testMethod=test_extend_attention_unified_vs_regular>
+
+    def test_extend_attention_unified_vs_regular(self):
+        """Test unified kernel matches 2-stage kernel across different configs."""
+        configs = [
+            (4, 512, 32, 8, 128),  # Standard config
+            (2, 2048, 32, 8, 128),  # Long sequence (test 2048 specifically)
+            (8, 256, 64, 8, 80),  # Non-standard head dim
+        ]
+    
+        for B, N_CTX, H_Q, H_KV, D in configs:
+            with self.subTest(B=B, N_CTX=N_CTX, H_Q=H_Q, H_KV=H_KV, D=D):
+>               self._test_extend_attention_unified_vs_regular_once(
+                    B, N_CTX, H_Q, H_KV, D
+                )
+
+test/registered/attention/test_triton_attention_kernels.py:1216: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/registered/attention/test_triton_attention_kernels.py:1200: in _test_extend_attention_unified_vs_regular_once
+    self.assertTrue(
+E   AssertionError: False is not true : Unified kernel output differs from 2-stage kernel. Max diff: 0.1669921875
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_decode_attention
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_decode_attention_large_batch_int64_offset
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_compact_grid
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_image_spans
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_sliding_window
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_triton37_lq576_n32
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_vs_regular
+registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_grouped_decode_attention
+  /opt/venv/lib/python3.12/site-packages/triton/backends/amd/compiler.py:100: UserWarning: kpack is deprecated starting from gfx950 and will be removed in later releases. So for now kpack = 2 will be overwritten to 1 to make transitioning easier.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention
+FAILED test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_block_sizes
+SUBFAILED(B=8, N_CTX=256, H_Q=64, H_KV=8, D=80) test/registered/attention/test_triton_attention_kernels.py::TestTritonAttention::test_extend_attention_unified_vs_regular
+3 failed, 11 passed, 26 warnings, 2 subtests passed in 36.00s

@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33033",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "98f960f5c5b6761da1f3bb75703478559443d4ac",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The exact candidate removes Gemma4's quadratic dense custom-mask construction, replaces it with O(number of images) span metadata, evaluates causal-or-same-image in both Triton extend kernels, and supplies spans only to sliding-attention layers. The base fails the candidate metadata regression; the candidate passes its regressions and an independent finite-window GPU adversarial case against a dense PyTorch reference.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-60c0ac3c2f97/venv/bin/python -m pytest -q /job/review-evidence-j-60c0ac3c2f97/base/test_gemma4_attention_mask.py (base checkout)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction: both tests failed because compact image-span metadata was absent on the recorded base. The base implementation still constructs and installs the dense custom mask."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-60c0ac3c2f97/venv/bin/python -m pytest -q test/registered/unit/layers/attention/test_gemma4_attention_mask.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Two candidate metadata tests passed, covering compact span contents, mixed batches, split-image causal fallback, and sliding-only layer routing."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-60c0ac3c2f97/venv/bin/python -m pytest -q test/registered/attention/test_triton_attention_kernels.py -k image_spans (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "Both modified Triton kernels matched an independent dense PyTorch attention reference on gfx950 for batching, prefixes, multiple images, block-crossing spans, and a request-boundary span."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-60c0ac3c2f97/venv/bin/python -m pytest -q /job/review-evidence-j-60c0ac3c2f97/candidate/test_adversarial_image_spans.py::TestTritonAttention::test_extend_attention_image_spans",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial modification passed both Triton kernels against the dense reference with a finite 127-token sliding window, a single-token span, a span beginning at the prefix boundary, and spans crossing query-block boundaries."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-60c0ac3c2f97/venv/bin/python -m pytest -q test/registered/attention/test_triton_attention_kernels.py",
+      "exit_code": 1,
+      "what_was_measured": "The issue-specific test and ten other tests passed. Three existing/general gfx950 checks failed: a large-attention tolerance, a block-size expectation mismatch, and one unified-versus-regular tolerance case. These match the candidate report and are not introduced by the image-span paths."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "Both changed Triton kernels executed on the assigned AMD Instinct MI355X (gfx950) with torch 2.11.0+rocm7.2 and matched independent dense PyTorch references in the candidate and adversarial cases.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "Gemma4 E4B weights were unavailable, so no full-model semantic/quality or TTFT reproduction was performed.",
+    "The original NVIDIA H20 and DGX Spark performance measurements could not be repeated on this AMD gfx950 host; review evidence establishes removal of the quadratic representation and kernel numerical correctness, not those exact speedups.",
+    "No native rebuild was required: all candidate runtime changes are checkout-local Python and Triton JIT source, and imports were confirmed to resolve to /job/repo.",
+    "The full Triton attention test file has three ambient gfx950 failures documented in raw/full_kernel_file.log."
+  ]
+}
