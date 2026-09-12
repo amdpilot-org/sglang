@@ -1111,7 +1111,7 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
         enable_hierarchical_cache: bool,
     ) -> SchedulerMetricsCollectorContext:
         enable_metrics = get_observability().enable_metrics
-        is_stats_logging_rank = ps.attn_tp_rank == 0
+        is_stats_logging_rank = ps.attn_tp_rank == 0 and ps.attn_cp_rank == 0
         current_scheduler_metrics_enabled = enable_metrics and (
             is_stats_logging_rank
             or get_observability().enable_metrics_for_all_schedulers

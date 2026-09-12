@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31896",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "The prepared base still selected every attention context-parallel rank with attention TP rank zero as a default scheduler metrics/logging rank. A CP=8 regression reproduced eight exporters for the same global request count. Requiring both attention TP rank zero and attention CP rank zero reduces the default export to one copy while preserving the explicit all-schedulers override.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-209f0042b9d2/venv/bin/python -m pytest -q test/registered/unit/observability/test_metrics_logging_rank.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "The actual SchedulerMetricsCollector.init_new method selected 8 default stats/export ranks for a CP=8 fixture instead of 1; 3 issue-specific assertions failed and 7 boundary assertions passed. See evidence/pytest_before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-209f0042b9d2/venv/bin/python -m pytest -q test/registered/unit/observability/test_metrics_logging_rank.py (after source fix)",
+      "exit_code": 0,
+      "what_was_measured": "All 10 issue-specific and boundary tests passed. See evidence/pytest_final.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-209f0042b9d2/venv/bin/python -m pytest -q test/registered/unit/observability",
+      "exit_code": 0,
+      "what_was_measured": "The complete observability unit directory passed: 188 tests and 4 subtests. See evidence/pytest_observability.log."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/observability/metrics_collector.py test/registered/unit/observability/test_metrics_logging_rank.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, spelling, safety, and registered-test checks passed for the changed source and test. See evidence/precommit_final.log."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared Torch/ROCm environment saw exactly one AMD Instinct MI355X device (evidence/gpu_inventory.log). The reported CP=8 topology requires eight participating ranks/GPUs; no GPU workload or full serving reproduction was performed or claimed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original eight-H20, CP=8 HTTP serving workload was not reproduced because only one gfx950 GPU was assigned and model weights were not provided.",
+    "The regression validates the actual scheduler metrics rank-selection implementation and aggregation cardinality, not model semantic accuracy or multi-node behavior.",
+    "The explicit enable_metrics_for_all_schedulers option intentionally continues to export from every scheduler."
+  ]
+}
