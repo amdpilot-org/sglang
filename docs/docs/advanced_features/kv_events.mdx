@@ -1,0 +1,35 @@
+---
+title: "KV Cache Events"
+---
+
+SGLang can publish KV cache placement events with `--kv-events-config`. The
+ZeroMQ payload is a msgpack-encoded `KVEventBatch`; consumers that need typed
+store metadata should decode the same payload as `KVEventBatchView`:
+
+```python
+import msgspec
+
+from sglang.srt.disaggregation.kv_events import BlockStoredView, KVEventBatchView
+
+batch = msgspec.msgpack.decode(payload, type=KVEventBatchView)
+for event in batch.events:
+    if isinstance(event, BlockStoredView):
+        index(event.block_hashes, cache_salt=event.cache_salt)
+```
+
+## Salted stores
+
+An unsalted `BlockStored` retains its legacy seven-element array shape. A
+salted store appends `metadata`, whose `cache_salt` identifies the request
+namespace. `BlockRemoved` and `AllBlocksCleared` do not carry this metadata.
+
+Block hashes are salt-namespaced: otherwise identical token prefixes in two
+salt namespaces produce different emitted hashes. The salt is not sufficient
+for an external consumer to reproduce SGLang's hash chain. Consumers should
+index the `block_hashes` in the event rather than recomputing them.
+
+`KVEventBatch` remains the publisher/legacy schema and ignores the trailing
+metadata while decoding. `KVEventBatchView` is the consumer schema that reads
+both salted and unsalted store shapes. Do not publish `BlockStoredView`:
+encoding its default `metadata=None` writes a trailing null and would change
+the legacy unsalted wire shape.

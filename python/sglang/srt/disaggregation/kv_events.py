@@ -308,6 +308,29 @@ class KVEventBatch(EventBatch):
     events: list[Union[BlockStored, BlockRemoved, AllBlocksCleared]]
 
 
+class BlockStoredView(BlockStored, tag="BlockStored", kw_only=True):
+    """Decoder-side view of a stored block event, salted or unsalted.
+
+    Publishers use two structs to preserve the legacy array length when no
+    metadata is present. Consumers instead need one shape that accepts both
+    lengths. This type is decode-only: encoding it without metadata appends a
+    trailing null, so publishers must continue to use ``BlockStored`` or
+    ``BlockStoredWithMetadata``.
+    """
+
+    metadata: Optional[BlockStoredMetadata] = None
+
+    @property
+    def cache_salt(self) -> Optional[str]:
+        return self.metadata.cache_salt if self.metadata is not None else None
+
+
+class KVEventBatchView(EventBatch):
+    """Consumer-side batch that preserves optional ``BlockStored`` metadata."""
+
+    events: list[Union[BlockStoredView, BlockRemoved, AllBlocksCleared]]
+
+
 class EventPublisher(ABC):
     """
     Lightweight publisher for EventBatch batches with
