@@ -1,0 +1,56 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34800",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1573",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1539",
+  "candidate_commit": "019f23054bd741d9bda9603f1f6c0b000fd4fac9",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduces both facets of the issue: make_shm_name('nodecheck') is 32 caller-visible characters for PID 12345, and an injected macOS OSError(63) on source-rank SharedMemory creation causes mismatched Gloo collectives and timeout errors. At the exact candidate commit, the names are capped at 30 characters while retaining cleanup PID parsing, and creation failure is communicated by a collective None broadcast. The candidate regression passes, as do independent nonzero-source-rank creation and receiver-open failure cases. This verifies the original name-length and OSError deadlock contract, but not the real macOS/MLX launch or MLX tensor parallelism beyond this defect.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 40s /tmp/amdpilot-repo-j-a00b0a555aae/venv/bin/python -m pytest -q -s /job/review-evidence-j-a00b0a555aae/test_same_node_shm_failure.py",
+      "exit_code": 1,
+      "what_was_measured": "On the exact base, the candidate's unchanged two-rank Gloo regression failed: source and peer returned Gloo timeout/peer-closure RuntimeErrors after source SharedMemory creation raised OSError(63). The normal same-node case passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a00b0a555aae/venv/bin/python - <base name-boundary probe>",
+      "exit_code": 0,
+      "what_was_measured": "On the exact base with PID 12345, nodecheck generated a 32-character caller-visible name; a long future kind with PID 4194304 generated 54 characters. PID parsing remained observable."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 60s /tmp/amdpilot-repo-j-a00b0a555aae/venv/bin/python -m pytest -q -s test/registered/utils/test_stale_shm_cleanup.py test/registered/unit/distributed/test_same_node_shm_failure.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate commit 019f23054bd741d9bda9603f1f6c0b000fd4fac9, 11 tests passed and 1 skipped, including length/cleanup regressions and real two-rank Gloo failure and success paths."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python timeout 60s /tmp/amdpilot-repo-j-a00b0a555aae/venv/bin/python -m pytest -q -s /job/review-evidence-j-a00b0a555aae/independent/test_adversarial_same_node.py",
+      "exit_code": 0,
+      "what_was_measured": "Two independent two-rank cases passed with source_rank=1: source creation OSError returned all false without timeout, and receiver open OSError produced the contract-correct [false, true] membership vector on both ranks."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-a00b0a555aae/venv/bin/python -m compileall -q python/sglang/srt/distributed/parallel_state.py python/sglang/srt/utils/stale_shm_cleanup.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source compiled successfully from the checkout."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365 019f23054bd741d9bda9603f1f6c0b000fd4fac9",
+      "exit_code": 2,
+      "what_was_measured": "Candidate source and tests had no reported whitespace errors, but several committed raw log artifacts contain trailing whitespace. This is non-functional PR hygiene and does not change the verification recommendation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The host exposes one ROCm gfx950-capable environment (Torch 2.11.0+rocm7.2, HIP 7.2, torch.cuda.is_available() true), but GPU execution is not relevant evidence for this POSIX shared-memory name and CPU collective control-flow defect. No GPU workload was run."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The review host is Linux x86_64, not macOS arm64; the actual macOS 31-character shm_open boundary was not executed.",
+    "MLX, Apple Silicon, Qwen weights, and a real SGLANG_USE_MLX=1 --tp 2 launch were unavailable, so the end-to-end reported launch was not reproduced.",
+    "The deterministic Gloo fixture verifies the original collective mismatch and graceful fallback only; it does not verify MLX tensor parallelism or model semantics after startup.",
+    "No native source changed, repository-environment.json declares native and wheel paths null, and therefore no native rebuild was required or performed.",
+    "The candidate diff contains trailing whitespace only in retained raw report logs; changed runtime source and tests were not flagged by git diff --check."
+  ]
+}
