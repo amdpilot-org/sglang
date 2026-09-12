@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/18891",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "9d08a826d6e9149cb8df17ea3c91ece7d550dc6b",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate adds a useful general comparison endpoint and its mapped/fused parameter logic passes focused CPU tests and an independent single-GPU numerical check. It remains a partial fix because checkpoint buffers are silently excluded, allowing a VAE-like live/disk state mismatch to report match=true, and an explicit empty module selection returns vacuous success.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python - <<'PY' ... base raw-QKV versus fused-QKV checksum and route inspection ... PY",
+      "exit_code": 0,
+      "what_was_measured": "At the exact recorded base, reproduced the raw-disk versus fused-live checksum mismatch and confirmed that the requested comparison endpoint was absent. Raw output: reports/j-6995d3041885/raw/base_reproduction.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_disk_server_checksum.py python/sglang/multimodal_gen/test/unit/test_layerwise_offload.py -k 'disk_server_checksum or mapped_weights_are_visible_to_checksums'",
+      "exit_code": 0,
+      "what_was_measured": "At candidate commit 9d08a826d6e9149cb8df17ea3c91ece7d550dc6b, 4 focused tests passed for renamed/fused parameters, corruption detection, no matched parameters, and offload checksum visibility. Raw output: reports/j-6995d3041885/raw/candidate_focused_tests.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python - <<'PY' ... checkpoint-present buffer differs from live buffer ... PY",
+      "exit_code": 0,
+      "what_was_measured": "A checkpoint with matching Parameter weight but differing running_mean buffer was reported as match=true because the checkpoint buffer was skipped. Raw output: reports/j-6995d3041885/raw/adversarial_counterexamples.txt"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python - <<'PY' ... compare_weights_with_disk(local_path, module_names=[]) ... PY",
+      "exit_code": 0,
+      "what_was_measured": "An explicit empty module selection returned success=true with no comparisons. Raw output: reports/j-6995d3041885/raw/adversarial_counterexamples.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python - <<'PY' ... independent GPU load/reference/corruption check ... PY",
+      "exit_code": 0,
+      "what_was_measured": "On one AMD Instinct MI355X, a loaded GPU parameter exactly matched an independently constructed CPU tensor; checksums matched before and diverged after a one-value GPU mutation. Raw output: reports/j-6995d3041885/raw/gpu_validation.txt"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI355X; Torch 2.11.0+rocm7.2; reports/j-6995d3041885/raw/gpu_validation.txt",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "A checkpoint-present buffer such as VAE running_mean can differ from live state while compare_module_weights_with_disk returns match=true because only named_parameters are included.",
+    "module_names=[] returns success=true and an empty modules object without comparing any state."
+  ],
+  "remaining_limitations": [
+    "FLUX.2-klein and Qwen-Image model-pair weights were not available, so model-specific VAE/text-encoder end-to-end parity remains unverified.",
+    "Only one GPU was assigned; TP/SP/DTensor multi-rank behavior was not exercised.",
+    "No native source changed, so a native rebuild was not applicable.",
+    "Python source imported from /job/repo/python using /tmp/amdpilot-repo-j-6995d3041885/venv/bin/python; AITer imported from /tmp/amdpilot-repo-j-6995d3041885/cache/aiter/module_aiter_core.so."
+  ]
+}
