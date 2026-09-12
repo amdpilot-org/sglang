@@ -1,0 +1,50 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38618",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "Independent review reproduced the silent transformer-layout weight drop on the prepared base through the production Glm5NextForConditionalGeneration.load_weights implementation. At exact candidate commit 7583e07e47654363c9fbf93eb0ed65f2c891110e, the candidate regression and adjacent GLM tests passed, and independent GPU checks verified exact source-to-destination values and shapes for all four reported families: mHC, KDA forget-gate, packed routed MoE gate/up/down, and packed KDA q/k/v conv1d. Malformed packed tensors fail explicitly. No counterexample to the reported loader contract was found.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebd85cf2cfd4/venv/bin/python -m pytest /job/review-evidence-j-ebd85cf2cfd4/test_glm5_next_hf_layout.py -q (on base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 1,
+      "what_was_measured": "The candidate regression run against the actual prepared base produced 4 failures and 1 pass. HF-layout mHC data was absent from the production loader destination while the released-layout control passed, reproducing the silent-drop defect. Raw output: /job/review-evidence-j-ebd85cf2cfd4/base-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebd85cf2cfd4/venv/bin/python -m pytest test/registered/unit/models/test_glm5_next_hf_layout.py test/registered/unit/models/test_glm5_next_dflash_capture.py test/registered/unit/models/test_glm5_next_modelopt.py -q (on candidate 7583e07e47654363c9fbf93eb0ed65f2c891110e)",
+      "exit_code": 0,
+      "what_was_measured": "9 tests and 2 subtests passed through the production loader, covering reported HF-layout routing, released-layout compatibility, explicit malformed-input errors, and adjacent GLM behavior. Raw output: /job/review-evidence-j-ebd85cf2cfd4/candidate-tests.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-ebd85cf2cfd4/venv/bin/python - <<'PY' ... independent convert_hf_native_weights GPU exact-value and malformed-shape checks ... PY (on candidate 7583e07e47654363c9fbf93eb0ed65f2c891110e)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI350X (gfx950), independently generated indexed tensors were compared exactly after all reported conversions for three experts and q/k/v slices. Mixed released/HF layout preservation and four malformed packed-shape failures were also checked. Raw output: /job/review-evidence-j-ebd85cf2cfd4/independent-adversarial.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One assigned AMD Instinct MI350X was visible through PyTorch 2.11.0+rocm7.2 as gfx950:sramecc+:xnack-. Candidate conversion consumed GPU tensors and exact independently indexed comparisons passed; see /job/review-evidence-j-ebd85cf2cfd4/base-environment.log and independent-adversarial.log.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The 628 GB GLM-5.3-Flash checkpoint was not available, so full server startup, generation quality, load-time, and GSM8K measurements were not repeated.",
+    "The prepared transformers installation reports 5.12.1 and its conversion mapping is installed outside the prepared venv at /opt/venv/lib/python3.12/site-packages/transformers/conversion_mapping.py; the exact 5.16.1 save_pretrained round trip from the report was not locally available.",
+    "No C++, FlyDSL, or other native source changed in the candidate, and repository-environment.json declares no task-specific native artifact, so a native rebuild was not applicable.",
+    "Verification establishes loader routing and exact representative tensor numerics/shapes on gfx950, not end-to-end model quality for the unavailable full checkpoint."
+  ],
+  "source_paths": [
+    "/job/repo/python/sglang/srt/models/glm5_next.py",
+    "/job/repo/test/registered/unit/models/test_glm5_next_hf_layout.py",
+    "/opt/venv/lib/python3.12/site-packages/transformers/conversion_mapping.py"
+  ],
+  "native_paths": [],
+  "raw_output_paths": [
+    "/job/review-evidence-j-ebd85cf2cfd4/base-environment.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/base-regression.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/candidate-imports.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/candidate-tests.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/independent-adversarial.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/transformers-mapping.log",
+    "/job/review-evidence-j-ebd85cf2cfd4/candidate.diff"
+  ]
+}
