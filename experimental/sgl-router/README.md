@@ -4,9 +4,15 @@ Slim, KV-aware, OpenAI-compatible router for SGLang workers.
 
 Serves a single model and routes across its workers. Exposes
 `/v1/tokenize`, `/v1/detokenize`, `/v1/models`, `/v1/chat/completions`
-(buffered and SSE), plus `/healthz` / `/readyz` and `/metrics`. Worker
+(buffered and SSE), `/abort_request`, plus `/healthz` / `/readyz` and `/metrics`. Worker
 pools come from either a static URL list or Kubernetes EndpointSlice
 discovery.
+
+`POST /abort_request` forwards the original request body to every registered
+worker because the router does not retain request-to-worker ownership. An
+unknown request ID is a no-op on SGLang workers, so this also covers requests
+in plain and prefill/decode deployments. The router returns a per-worker JSON
+breakdown and uses `502 Bad Gateway` if any worker could not process the abort.
 
 ## Building
 
