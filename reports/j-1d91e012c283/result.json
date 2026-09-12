@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37554",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The checked-out source still contains the reported unknown-model registration path. The upstream draft candidate PR #37555 rejects that registration under IGW, but its recovery claim depends on periodic reconciliation PR #32322, which is not present at this base and remains open. The prepared image also has neither cargo nor a prebuilt gateway binary, so the actual Rust implementation and a failing-before/passing-after regression could not be executed. No incomplete source fix was committed.",
+  "tests": [
+    {
+      "command": "CARGO_HOME=/tmp/amdpilot-repo-j-1d91e012c283/cargo-home CARGO_TARGET_DIR=/tmp/amdpilot-repo-j-1d91e012c283/target cargo test --lib issue_37554_regression::igw_does_not_create_an_unroutable_unknown_model_worker -- --exact --nocapture",
+      "exit_code": 127,
+      "what_was_measured": "Attempted to compile and run a regression over the real CreateLocalWorkerStep; the shell reported cargo: command not found before compilation. The temporary test was removed after recording the blocker."
+    },
+    {
+      "command": "git merge-base --is-ancestor a3d51c0b0442762f302462a98d1f411b62c053d0 HEAD",
+      "exit_code": 1,
+      "what_was_measured": "Verified that the exact head commit of upstream periodic reconciliation PR #32322 is not an ancestor of the prepared base."
+    },
+    {
+      "command": "source inspection: create_worker.rs, local/mod.rs, service_discovery.rs, router selection call sites, and upstream PRs #37555/#32322",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed that empty discovered metadata falls back to UNKNOWN_MODEL_ID; discover_metadata continues on failure; IGW selects by requested model; tracked pods deduplicate later events; and this base has no periodic LIST/resubmit implementation."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reported gateway control-plane path requires no model or GPU. No GPU claim is made."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The real Rust gateway could not be compiled or run because cargo is absent from the prepared image and no prebuilt gateway executable was found.",
+    "No Kubernetes service-discovery reproduction was run.",
+    "Upstream draft PR #37555 alone is not a complete fix on this base: rejecting registration leaves the pod in tracked_pods, while the periodic recovery path in upstream PR #32322 is absent.",
+    "No failing-before/passing-after executable regression is claimed."
+  ]
+}
