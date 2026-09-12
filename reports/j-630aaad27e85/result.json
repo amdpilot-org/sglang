@@ -1,0 +1,63 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/21443",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3221",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3034",
+  "candidate_commit": "8f262970bde402bb73e2fb05ff9f6b7a93c3c74b",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The recorded base reproduced unsafe host-memory reporting in all three original MPS paths. The exact candidate caps valid reports by Metal's recommended working set and remaining driver headroom, fails closed for unavailable or invalid safety APIs, and fixes the prior CI taxonomy defect. Independent source-level adversarial tests found no remaining counterexample to the original reporting contract.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-630aaad27e85/venv/bin/python /job/review-evidence-j-630aaad27e85/probe_mps_contract.py (on base)",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original failure with mocked 64 GiB total/60 GiB available host RAM: SRT available=60 GiB, device stub total=64 GiB, multimodal total=64 GiB, and multimodal available=60 GiB. Also recorded checkout and Torch import paths and MPS unavailability."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-630aaad27e85/venv/bin/python -m pytest -q test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 23 passed, covering recommended limits, invalid/missing APIs, allocation headroom, system pressure, non-negative clamping, and all three integrations."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-630aaad27e85/venv/bin/python /job/review-evidence-j-630aaad27e85/adversarial_candidate.py",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial matrix for tighter Metal/system constraints, equal/over-limit allocations, empty-cache behavior in both available-memory paths, all three production integrations, and fail-closed behavior for missing, raising, invalid, non-positive, and infinite results."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-630aaad27e85/venv/bin/python scripts/lint/check_registered_tests.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository registered-test taxonomy validation; confirms the prior MLX-registration defect is corrected by CPU-only unit registration."
+    },
+    {
+      "command": "PRE_COMMIT_HOME=/tmp/amdpilot-repo-j-630aaad27e85/pre-commit pre-commit run --files python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py test/registered/unit/utils/test_mps_memory.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository pre-commit hooks passed on the candidate's source and regression files."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-630aaad27e85/venv/bin/python -m compileall -q python/sglang/_mps_memory.py python/sglang/_platform_stubs.py python/sglang/srt/utils/common.py python/sglang/multimodal_gen/runtime/platforms/mps.py",
+      "exit_code": 0,
+      "what_was_measured": "Python compilation of every changed production module."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared Linux/x86_64 Torch 2.11.0+rocm7.2 environment reports torch.backends.mps.is_available() == false. AMD GPU execution cannot validate Apple Metal memory accounting."
+  },
+  "native_rebuilt": false,
+  "native_rebuilt_evidence": "No C/C++/native source or build input changed; the candidate modifies Python, tests, and reports only.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No Apple Silicon/MPS device was available, so real Metal limits and an actual MPS serving or multimodal workload remain hardware-unverified.",
+    "UMA pressure, paging avoidance, and machine stability under near-limit allocation were not exercised.",
+    "PyTorch builds without working recommended_max_memory() and driver_allocated_memory() are intentionally rejected rather than assigned an unverifiable host-memory fallback."
+  ],
+  "evidence_root": "/job/review-evidence-j-630aaad27e85",
+  "source_paths": [
+    "/job/repo/python/sglang/_mps_memory.py",
+    "/job/repo/python/sglang/_platform_stubs.py",
+    "/job/repo/python/sglang/srt/utils/common.py",
+    "/job/repo/python/sglang/multimodal_gen/runtime/platforms/mps.py"
+  ],
+  "native_paths": []
+}
