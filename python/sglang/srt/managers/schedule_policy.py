@@ -229,6 +229,7 @@ class SchedulePolicy:
         enable_hierarchical_cache: bool,
         enable_priority_scheduling: bool,
         schedule_low_priority_values_first: bool,
+        lpm_aging_tokens_per_pass: int = 0,
     ):
         self.policy = self._validate_and_adjust_policy(policy, tree_cache)
         self.tree_cache = tree_cache
@@ -236,6 +237,7 @@ class SchedulePolicy:
         self.enable_priority_scheduling = enable_priority_scheduling
         self.schedule_low_priority_values_first = schedule_low_priority_values_first
         self.priority_sign = 1 if schedule_low_priority_values_first else -1
+        self.lpm_aging_tokens_per_pass = lpm_aging_tokens_per_pass
 
         # It is used to find the matching prefix for in-batch prefix caching.
         self.waiting_queue_radix_tree = RadixCache.create_simulated()
@@ -247,6 +249,12 @@ class SchedulePolicy:
         processed_tokens: int = 0,
     ) -> None:
         policy = self._determine_active_policy(waiting_queue)
+
+        # Only active LPM passes count toward LPM aging. In particular, do not
+        # accumulate age while the large-queue FCFS fallback is in effect.
+        if policy == CacheAwarePolicy.LPM and self.lpm_aging_tokens_per_pass > 0:
+            for req in waiting_queue:
+                req.lpm_waiting_passes += 1
 
         # Populate req.num_matched_prefix_tokens at schedule time. Cache-aware policies
         # set it in _compute_prefix_matches; do the same full match for
@@ -273,7 +281,9 @@ class SchedulePolicy:
             )
             if policy == CacheAwarePolicy.LPM:
                 SchedulePolicy._sort_by_longest_prefix(
-                    waiting_queue, temporary_deprioritized
+                    waiting_queue,
+                    temporary_deprioritized,
+                    self.lpm_aging_tokens_per_pass,
                 )
             elif policy == CacheAwarePolicy.DFS_WEIGHT:
                 SchedulePolicy._sort_by_dfs_weight(waiting_queue, self.tree_cache)
@@ -399,16 +409,31 @@ class SchedulePolicy:
 
     @staticmethod
     def _sort_by_longest_prefix(
-        waiting_queue: List[Req], temporary_deprioritized: Set[int]
+        waiting_queue: List[Req],
+        temporary_deprioritized: Set[int],
+        aging_tokens_per_pass: int = 0,
     ) -> None:
-        """Sorts the waiting queue based on the longest prefix match."""
-        waiting_queue.sort(
-            key=lambda r: (
-                -r.num_matched_prefix_tokens
-                if r.rid not in temporary_deprioritized
-                else float("inf")
+        """Sort by matched prefix plus an optional per-waiting-pass bonus."""
+        if aging_tokens_per_pass > 0:
+            waiting_queue.sort(
+                key=lambda r: (
+                    -(
+                        r.num_matched_prefix_tokens
+                        + aging_tokens_per_pass * r.lpm_waiting_passes
+                    )
+                    if r.rid not in temporary_deprioritized
+                    else float("inf")
+                )
             )
-        )
+        else:
+            # Keep the disabled path identical to the original LPM key.
+            waiting_queue.sort(
+                key=lambda r: (
+                    -r.num_matched_prefix_tokens
+                    if r.rid not in temporary_deprioritized
+                    else float("inf")
+                )
+            )
 
     @staticmethod
     def _uncached_len(r: Req) -> int:

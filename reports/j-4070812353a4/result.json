@@ -1,0 +1,38 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31954",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that current LPM ordering has no aging input, then added an opt-in --lpm-aging-tokens-per-pass setting. Active LPM passes now increase a per-request counter and the sort key combines matched-prefix tokens with the aging bonus. The default zero path retains the original sort key, temporarily deprioritized requests remain last, and the existing >128-request FCFS fallback does not accumulate LPM age.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-4070812353a4/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_policy_lpm_aging.py",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: the prepared source lacked the server argument, policy constructor input, and aging-aware sort API. Raw output: reports/j-4070812353a4/raw/failing-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4070812353a4/venv/bin/python -m pytest -q test/registered/unit/managers/test_schedule_policy_lpm_aging.py test/registered/unit/managers/test_schedule_policy.py test/registered/unit/managers/test_load_inquirer.py test/registered/unit/test_server_args_cli_metadata.py",
+      "exit_code": 0,
+      "what_was_measured": "17 tests plus 2 subtests passed, covering repeated hot-arrival displacement, exact-threshold stability, disabled behavior, temporary deprioritization, the 129-request FCFS boundary, CLI wiring, and adjacent scheduler policies. Raw output: reports/j-4070812353a4/raw/passing-after-unit-expanded.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-4070812353a4/venv/bin/python test/registered/unit/managers/test_schedule_policy_lpm_aging.py",
+      "exit_code": 0,
+      "what_was_measured": "The registered test file ran directly through its CI entry point: 7 tests passed. Raw output: reports/j-4070812353a4/raw/passing-after-direct.txt"
+    },
+    {
+      "command": "pre-commit run --files python/sglang/srt/arg_groups/fields/schedule.py python/sglang/srt/arg_groups/validation_hook.py python/sglang/srt/managers/schedule_batch.py python/sglang/srt/managers/schedule_policy.py python/sglang/srt/managers/scheduler.py test/registered/unit/managers/test_schedule_policy_lpm_aging.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, syntax, security, and registered-test checks passed. Raw output: reports/j-4070812353a4/raw/pre-commit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reproduced defect and regression are CPU-only Python scheduling decisions; no kernel or model execution participates in the LPM sort key. The assigned gfx950 was therefore not used as irrelevant evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The production GLM-5.2-NVFP4, 8xB300 workload and its 20-60 second TTFT tail were not reproduced; that hardware, topology, traffic, and model weights were unavailable and a tiny Llama fixture cannot qualify them.",
+    "The regression deterministically validates queue ordering and the starvation bound in scheduler passes, not wall-clock TTFT under a full serving workload.",
+    "No native code changed, so no native rebuild was applicable."
+  ]
+}

@@ -159,6 +159,9 @@ def check_server_args(server_args: Any):
     validate_buckets_rule("--generation-tokens-buckets", cfg.generation_tokens_buckets)
 
     # Check scheduling policy
+    assert cfg.lpm_aging_tokens_per_pass >= 0, (
+        "--lpm-aging-tokens-per-pass must be non-negative"
+    )
     if cfg.enable_priority_scheduling:
         assert cfg.schedule_policy in [
             "fcfs",

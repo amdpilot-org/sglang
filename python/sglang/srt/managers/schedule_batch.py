@@ -1337,6 +1337,8 @@ class Req(ReqDllmMixin):
 
         # Snapshot of the scheduler prefill-token counter taken at waiting_queue entry; used by HRRN aging.
         self.arrival_processed_tokens: int = 0
+        # Active LPM passes spent waiting. Used only when LPM aging is enabled.
+        self.lpm_waiting_passes: int = 0
 
     @property
     def seqlen(self) -> int:
@@ -1839,6 +1841,7 @@ class Req(ReqDllmMixin):
         self.kv.cache_protected_len = 0
         self.kv_rotation_base = None
         self.num_matched_prefix_tokens = 0
+        self.lpm_waiting_passes = 0
         self.lock_receipt = DecLockRefParams()
         self.swa_prefix_lock_released = False
         self.swa_branching_seqlen = None
