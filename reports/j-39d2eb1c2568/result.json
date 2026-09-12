@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/31118",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/721",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/712",
+  "candidate_commit": "d31f042690ab8fd506a5c3d23896f45765c23984",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "Accept as test-only hardening. The candidate adds accurate Qwen3 regression coverage and makes no production-code change. The prepared base already contains the production prefix-holdback fix from upstream PR #34458, so the original failure does not reproduce on the candidate parent. The failure was independently reproduced on the issue-date implementation: splitting a reasoning-attached </think> prefix caused the complete marker and answer to be emitted as reasoning while the detector remained in reasoning mode. The exact candidate passes its own focused regression and an independent expected-output suite across all two-chunk boundaries, all internal end-tag partitions, empty chunks, incomplete tags, non-thinking input, tool-call transition, and 20,000 deterministic random chunkings.",
+  "classification": "test-only hardening of a production fix already present in the base",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-39d2eb1c2568/venv/bin/python /job/review-evidence-j-39d2eb1c2568/adversarial_qwen3.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Actual prepared-base source import and 20,627 oracle-based partition/random cases plus incomplete-tag and non-thinking cases; all passed, so the original defect was not reproducible on the prepared base."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-39d2eb1c2568/venv/bin/python /job/review-evidence-j-39d2eb1c2568/adversarial_qwen3.py (historical issue-date commit 7e229e2a817de7d59e919db7ab3809ab4a22e754)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced the original causal failure. Chunks ['<think>reasoning<', '/think>answer'] produced reasoning='reasoning</think>answer', normal='', instead of reasoning='reasoning', normal='answer'."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-39d2eb1c2568/venv/bin/python -m pytest -q test/registered/unit/parser/test_reasoning_parser.py::TestStreamingChunkSizeInvariance (candidate d31f042690ab8fd506a5c3d23896f45765c23984)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and neighboring invariance coverage: 11 tests and 246 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-39d2eb1c2568/venv/bin/python /job/review-evidence-j-39d2eb1c2568/adversarial_qwen3.py (candidate d31f042690ab8fd506a5c3d23896f45765c23984)",
+      "exit_code": 0,
+      "what_was_measured": "Independent expected-output checks passed for 20,627 cases, including arbitrary mixed-content tag splits that trigger the historical bug."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The reviewed change and defect are deterministic Python string parsing. No GPU numerical or kernel claim is made. The environment exposes one ROCm device (Torch 2.11.0+rocm7.2, HIP 7.2), but model inference was not needed to validate parser state transitions."
+  },
+  "native_rebuilt": false,
+  "native_rebuild_reason": "Candidate diff contains only Python tests and report artifacts; repository-environment.json declares native=null, and the imported implementation was /job/repo/python/sglang/srt/parser/reasoning_parser.py. No native source or library changed.",
+  "remaining_counterexamples": [
+    "Applied to the vulnerable issue-date implementation rather than the already-fixed prepared base, this candidate's test-only change does not repair chunks ['<think>reasoning<', '/think>answer']; the parser still returns all text as reasoning and fails to transition."
+  ],
+  "remaining_limitations": [
+    "No live Qwen3 model server was launched; the reported endless-generation symptom was validated at its deterministic parser-state cause, not by timing out an end-to-end generation.",
+    "The candidate cannot itself be credited as the full original-issue fix because it changes no runtime code; runtime resolution comes from code already in its parent/base.",
+    "Validation ran on x86_64 AMD EPYC with ROCm 7.2 available. This pure-Python parser path is architecture-independent, and no native rebuild or GPU numerical reference applies."
+  ]
+}
