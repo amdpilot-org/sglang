@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35537",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the stale batch_is_full early return in the checked-out scheduler and reset the per-pass admission hint before current capacity is evaluated. Added a failing-before/passing-after regression plus zero-capacity and empty-queue boundary cases. A real single-gfx950 tiny-Llama serving probe admitted all four staggered chunked-prefill requests, including the fourth while earlier requests remained active.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py -k ChunkedPrefillBatchFullReset",
+      "exit_code": 1,
+      "what_was_measured": "Before-fix reproduction: stale fullness skipped current capacity/admission; all three new regression and boundary tests failed. Raw output: reports/j-17cb28bd130f/raw/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m pytest -q test/registered/unit/managers/test_scheduler_chunked_req_gate.py",
+      "exit_code": 0,
+      "what_was_measured": "After-fix scheduler regression suite: 6 passed, including stale-state reconsideration, real zero-capacity re-latching, and empty-queue behavior. Raw output: reports/j-17cb28bd130f/raw/regression-after.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python reports/j-17cb28bd130f/run_chunked_prefill_probe.py /tmp/amdpilot-repo-j-17cb28bd130f/tiny-random-llama reports/j-17cb28bd130f/raw/gpu-serving",
+      "exit_code": 0,
+      "what_was_measured": "Real HTTP/engine execution on one gfx950 GPU: four staggered 72-token prompts used 32-token chunked prefill and each generated 30 tokens; load evidence reached 4 running, 0 waiting, and the server log shows a transient queued request admitted while earlier requests remained active. The owned server process group was terminated and GPU allocations returned to zero."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-17cb28bd130f/venv/bin/python -m py_compile reports/j-17cb28bd130f/*.py && git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "Probe scripts compile and the patch has no whitespace errors."
+    }
+  ],
+  "gpu_execution": true,
+  "native_rebuilt": false,
+  "remaining_limitations": "The qualified random tiny Llama validates transport, scheduler admission, and GPU engine execution only. Qwen3.8-27B-NVFP4 weights and its hybrid GDN/linear-attention, mamba-state, NEXTN speculative decoding, FP8 KV, Docker/WSL2, semantic accuracy, and multi-minute production workload were unavailable and remain unverified. No native C++ or FlyDSL source changed, so no native rebuild was applicable. The server required SIGKILL after its 30-second graceful-shutdown timeout; the subreaper collected descendants and a fresh Torch process reported zero allocated/reserved GPU bytes."
+}
