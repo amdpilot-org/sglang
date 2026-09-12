@@ -27,9 +27,10 @@ from pathlib import Path
 import torch
 
 from sglang.multimodal_gen.runtime.platforms import current_platform
+from sglang.multimodal_gen.test.test_utils import DEFAULT_SMALL_MODEL_NAME_FOR_TEST
 from sglang.test.test_utils import CustomTestCase
 
-_MODEL = "Tongyi-MAI/Z-Image-Turbo"
+_MODEL = DEFAULT_SMALL_MODEL_NAME_FOR_TEST
 _PORT = 30811
 _STARTUP_TIMEOUT_S = 1200
 

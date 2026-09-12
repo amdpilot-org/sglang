@@ -16,12 +16,15 @@ import pytest
 from openai import OpenAI
 
 from sglang.multimodal_gen.test.server.test_server_utils import ServerManager
-from sglang.multimodal_gen.test.test_utils import get_dynamic_server_port
+from sglang.multimodal_gen.test.test_utils import (
+    DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST,
+    get_dynamic_server_port,
+)
 
 # Test models and prompts
 IMAGE_MODEL = "Efficient-Large-Model/Sana_600M_512px_diffusers"
 IMAGE_PROMPT = "A beautiful sunset over mountains, oil painting style"
-VIDEO_MODEL = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+VIDEO_MODEL = DEFAULT_WAN_2_1_T2V_1_3B_MODEL_NAME_FOR_TEST
 VIDEO_PROMPT = "A cat playing with a ball"
 
 # Timeout settings
