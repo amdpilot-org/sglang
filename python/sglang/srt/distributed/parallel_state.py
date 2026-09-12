@@ -2406,15 +2406,28 @@ def init_distributed_environment(
         else:
             pg_options = get_torch_distributed_pg_options()
 
-        # this backend is used for WORLD
-        torch.distributed.init_process_group(
-            backend=backend,
-            init_method=distributed_init_method,
-            world_size=world_size,
-            rank=rank,
-            timeout=timeout,
-            pg_options=pg_options,
-        )
+        # A singleton process group does not need network rendezvous. Using an
+        # in-process store removes the close-before-TCPStore-bind race for the
+        # common DP=N, TP=1 layout, where every scheduler owns an independent
+        # one-rank group.
+        if world_size == 1 and distributed_init_method.startswith("tcp://"):
+            torch.distributed.init_process_group(
+                backend=backend,
+                store=torch.distributed.HashStore(),
+                world_size=world_size,
+                rank=rank,
+                timeout=timeout,
+                pg_options=pg_options,
+            )
+        else:
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=distributed_init_method,
+                world_size=world_size,
+                rank=rank,
+                timeout=timeout,
+                pg_options=pg_options,
+            )
 
         # Create a global TCPStore for coordination (used by NIXL)
         if moe_a2a_backend == "nixl":

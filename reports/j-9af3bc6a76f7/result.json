@@ -1,0 +1,41 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37215",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/1197",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/1062",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/1159",
+  "candidate_commit": "e5ce94b77e1db3a2c4641abf97ebf391926af8ba",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced all three independent-review counterexamples, retained non-ephemeral allocation for multi-rank rendezvous, eliminated TCPStore binding for the reported independent TP=1 DP replicas with HashStore, derived unique explicit ports per DP rank, and made unsafe allocator fallbacks fail closed.",
+  "tests": [
+    {
+      "command": "Exact-candidate Python probe at e5ce94b77e1db3a2c4641abf97ebf391926af8ba using real torch.distributed.TCPStore plus mocked procfs boundaries",
+      "exit_code": 0,
+      "what_was_measured": "A listener taking the released non-ephemeral port caused DistNetworkError EADDRINUSE; explicit DP allocations returned [30101, 30101, 30101] before reservation failure; unavailable and exhausted procfs cases returned mocked ephemeral ports 45678 and 45679."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af3bc6a76f7/venv/bin/python -m pytest -q test/registered/utils/test_socket_utils.py test/registered/unit/server_args/test_server_args.py::TestPortArgs test/registered/unit/distributed/test_parallel_state.py",
+      "exit_code": 0,
+      "what_was_measured": "47 passed, including non-ephemeral selection/exclusions, fail-closed boundaries, explicit per-DP port uniqueness/overflow, singleton HashStore selection, and preservation of TCP rendezvous for multi-rank groups."
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9af3bc6a76f7/venv/bin/python <occupied-port singleton NCCL and explicit DP-port probe>",
+      "exit_code": 0,
+      "what_was_measured": "With a listener already bound to 127.0.0.1:30101, a real one-rank NCCL process group initialized and completed GPU all_reduce with value 7.0; PortArgs returned unique ports 30101 through 30108 for DP ranks 0 through 7."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-9af3bc6a76f7/venv/bin/python -m compileall -q python/sglang/srt/distributed/parallel_state.py python/sglang/srt/managers/data_parallel_controller.py python/sglang/srt/ray/data_parallel_controller.py python/sglang/srt/server_args.py python/sglang/srt/utils/network.py",
+      "exit_code": 0,
+      "what_was_measured": "All changed Python production modules compiled successfully."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "A real one-rank NCCL process group on the assigned AMD gfx950 GPU completed torch.distributed.all_reduce while the advertised TCP port was occupied, demonstrating that the corrected singleton path did not bind TCPStore.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The host provides one AMD gfx950 GPU with ROCm, not eight NVIDIA H800 GPUs with CUDA/NCCL.",
+    "Qwen3-Embedding weights were unavailable, so the complete eight-GPU serving launch was not run.",
+    "Multi-rank groups still use TCPStore. Non-ephemeral allocation prevents the reported OS ephemeral-reuse mechanism but cannot exclude a deliberately competing listener during the close-before-bind interval because PyTorch TCPStore cannot adopt SGLang's reserved socket.",
+    "No native source changed; native rebuild was not applicable."
+  ]
+}

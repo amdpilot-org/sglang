@@ -1418,6 +1418,22 @@ class TestFlashinferMegaMoeConfig(CustomTestCase):
 
 
 class TestPortArgs(unittest.TestCase):
+    def test_explicit_nccl_port_is_offset_per_dp_rank(self):
+        server_args = ServerArgs(model_path="dummy", dp_size=8, nccl_port=30101)
+
+        ports = [
+            PortArgs.init_new(server_args, dp_rank=dp_rank).nccl_port
+            for dp_rank in range(server_args.dp_size)
+        ]
+
+        self.assertEqual(ports, list(range(30101, 30109)))
+
+    def test_explicit_nccl_port_dp_offset_rejects_overflow(self):
+        server_args = ServerArgs(model_path="dummy", dp_size=2, nccl_port=65535)
+
+        with self.assertRaisesRegex(ValueError, "exceeds 65535"):
+            PortArgs.init_new(server_args, dp_rank=1)
+
     @patch("sglang.srt.server_args.tempfile.NamedTemporaryFile")
     def test_init_new_standard_case(self, mock_temp_file):
         mock_temp_file.return_value.name = "temp_file"

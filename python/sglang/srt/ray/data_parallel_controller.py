@@ -78,7 +78,7 @@ class RayDataParallelController(DataParallelController):
         dp_port_args_list = []
 
         for dp_rank in range(get_parallel().dp_size):
-            tmp_port_args = PortArgs.init_new(server_args)
+            tmp_port_args = PortArgs.init_new(server_args, dp_rank=dp_rank)
             tmp_port_args.tokenizer_ipc_name = port_args.tokenizer_ipc_name
             tmp_port_args.detokenizer_ipc_name = port_args.detokenizer_ipc_name
             tmp_port_args.instance_id = port_args.instance_id
