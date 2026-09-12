@@ -1,0 +1,48 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/7892",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "ec7e5ca1467413eb2487812d44f1d10c96cb42f3",
+  "outcome": "environment_blocked",
+  "recommendation": "unverified",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a credible partial implementation for eager, fixed-width DeepSeek NextN draft-extend with segmented A2A. Its focused unit suite passes and independent single-GPU tensor checks confirm its split/recombine mechanics. The original issue's decisive behavior was not verified: the candidate's own coverage proof requires a 4-GPU DeepEP deployment and DeepSeek target/NextN weights, while this review had one GPU and no qualifying weights. CUDA-graph draft-extend, widened/multi-layer draft inputs, non-segmented dispatch, context parallelism, and other draft architectures remain unsupported or gated off, so this is not a complete implementation of the open feature request.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-418b6b8f7292/venv/bin/python -m pytest -q /job/review-evidence-j-418b6b8f7292/candidate-tests/test_tbo_draft_extend_split.py (base checkout)",
+      "exit_code": 2,
+      "what_was_measured": "Failing-before: collection failed because the base has no _compute_moe_deepseek_draft_extend operation strategy. Raw log: /job/review-evidence-j-418b6b8f7292/logs/base-candidate-regression.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-418b6b8f7292/venv/bin/python -m pytest -q test/registered/unit/batch_overlap test/registered/unit/spec/test_eagle_draft_extend_logits.py test/registered/unit/spec/test_eagle_worker_v2_topk1_fastpath.py (candidate checkout)",
+      "exit_code": 0,
+      "what_was_measured": "51 focused compatibility/regression tests and 7 subtests passed. Raw log: /job/review-evidence-j-418b6b8f7292/logs/candidate-focused-suite.log"
+    },
+    {
+      "command": "HIP_VISIBLE_DEVICES=0 PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-418b6b8f7292/venv/bin/python < independent randomized GPU split/recombine check",
+      "exit_code": 0,
+      "what_was_measured": "35 combinations of batch size and fixed request width on AMD Instinct MI350X gfx950 exactly preserved token/sequence tensors, rebased flat indices, and parent capture-buffer writes (max_abs_error=0). Raw log: /job/review-evidence-j-418b6b8f7292/logs/independent-gpu-split.log"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-418b6b8f7292/venv/bin/python -m pytest --collect-only -q test/registered/e2e/spec/test_deepep_mtp_draft_extend_tbo.py",
+      "exit_code": 0,
+      "what_was_measured": "Only collection of the three 4-GPU tests succeeded; this did not execute a server, distributed collectives, model numerics, or throughput. Raw log: /job/review-evidence-j-418b6b8f7292/logs/candidate-e2e-collect.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "One AMD Instinct MI350X (gfx950) executed independent tensor-level numerical checks. No model forward or multi-GPU DeepEP execution was possible.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With draft-extend CUDA graph replay enabled (the normal path unless SGLANG_DISABLE_DRAFT_EXTEND_CUDA_GRAPH=1), the candidate gate disables draft-extend TBO.",
+    "EagleDraftExtendInput with num_front_tokens > 0 (widened/multi-layer input) is rejected by an assertion rather than supported.",
+    "A none/non-segmented speculative MoE A2A backend leaves draft-extend TBO disabled.",
+    "Attention context parallelism greater than one leaves draft-extend TBO disabled.",
+    "Draft architectures other than DeepseekV3ForCausalLMNextN leave draft-extend TBO disabled.",
+    "No executed evidence shows that a real 4-GPU DeepEP draft-extend batch enters both TBO children without collective mismatch, preserves GSM8K accuracy and speculative acceptance length, or doubles the running-batch limit described by the issue."
+  ],
+  "remaining_limitations": [
+    "The review environment exposed one AMD Instinct MI350X GPU; the candidate integration test is registered for four H100-class GPUs.",
+    "The required DeepSeek-V3 target and NextN draft model weights were unavailable. The tiny Llama fixture cannot qualify this architecture, segmented A2A, or distributed behavior.",
+    "All candidate changes are Python; repository-environment.json reports native=null. No native rebuild was applicable, and imports were confirmed from /job/repo/python rather than an installed package.",
+    "The candidate's functional integration and claimed capacity improvement therefore remain unverified even though its isolated mechanics are well tested."
+  ]
+}
