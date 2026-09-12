@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33408",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced Unlimited-OCR's heterogeneous gundam crop stack failure in the checked-out implementation and added a narrow fallback that encodes differently shaped crop tensors per item while retaining the existing batched path for equal shapes. Added regression and boundary coverage for item order, per-item crop flags, absent crop flags, homogeneous batching, CPU, and the assigned gfx950 GPU.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-cea952bdcb5c/venv/bin/python -m pytest -q test/registered/unit/models/test_unlimited_ocr.py (before fix)",
+      "exit_code": 1,
+      "what_was_measured": "The untouched Unlimited-OCR implementation raised RuntimeError from torch.stack for crop tensors shaped [1, 12, 3, 2, 2] and [1, 1, 3, 2, 2] on CPU, and independently for [1, 3, 3, 2, 2] and [1, 1, 3, 2, 2] on gfx950. Raw output: reports/j-cea952bdcb5c/raw/failing_before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cea952bdcb5c/venv/bin/python -m pytest -q test/registered/unit/models/test_unlimited_ocr.py (after fix)",
+      "exit_code": 0,
+      "what_was_measured": "Four tests passed: heterogeneous crop counts preserve output order and per-item flags, equal crop counts retain one batched encoder call, missing flags retain heuristic behavior, and heterogeneous crops execute on the assigned gfx950 GPU with output checked against an independent marker/count reference. Raw output: reports/j-cea952bdcb5c/raw/final_focused_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cea952bdcb5c/venv/bin/python script invoking unlimited_ocr.dynamic_preprocess for (2925, 4454) and (2242, 3157)",
+      "exit_code": 0,
+      "what_was_measured": "The actual checked-out preprocessor produced unequal crop counts: ratio 4x6 / 24 crops and ratio 3x4 / 12 crops. Raw output: reports/j-cea952bdcb5c/raw/preprocess_tile_counts.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-cea952bdcb5c/venv/bin/python -m compileall -q python/sglang/srt/models/unlimited_ocr.py test/registered/unit/models/test_unlimited_ocr.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed production and test Python sources compile successfully. Raw output: reports/j-cea952bdcb5c/raw/compileall.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "The heterogeneous-crop regression executed tensor creation, dispatch, concatenation, and exact output comparison on GPU 0, AMD Instinct MI355X, gfx950, under torch 2.11.0+rocm7.2. This is a model-method fixture, not a full model server run."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The baidu/Unlimited-OCR weights were not available, so the original full HTTP serving scenario and semantic model output were not run.",
+    "The source report used CUDA on an RTX 3090; available hardware was one ROCm gfx950 GPU. The architecture-independent stack failure and corrected control flow were exercised on both CPU and gfx950.",
+    "Scheduler-wide per-request exception isolation is outside this narrow model batching correction and remains unverified.",
+    "No native sources changed, so no native rebuild was applicable."
+  ]
+}

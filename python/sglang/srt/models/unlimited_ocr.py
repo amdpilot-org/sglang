@@ -246,6 +246,41 @@ class UnlimitedOCRForCausalLM(nn.Module):
         """Process multimodal data items into concatenated vision features."""
         target_dtype = self.vision_model.dtype
         has_local_crops = self._collect_mm_flag(mm_items, "has_local_crops")
+
+        crop_shapes = {tuple(item.images_crop.shape) for item in mm_items}
+        if len(crop_shapes) > 1:
+            # Gundam preprocessing chooses the number of local tiles from each
+            # image's aspect ratio. Encode heterogeneous items independently;
+            # their raw crops cannot be stacked, while their feature sequences
+            # can still be concatenated in the original item order.
+            vision_feature_lists: List[torch.Tensor] = []
+            for idx, item in enumerate(mm_items):
+                pixel_values = item.feature.unsqueeze(0).type(target_dtype)
+                images_crop = (
+                    item.images_crop.unsqueeze(0)
+                    .type(target_dtype)
+                    .to(device=pixel_values.device)
+                )
+                images_spatial_crop = item.images_spatial_crop.type(torch.long).to(
+                    device=pixel_values.device
+                )
+                if images_spatial_crop.dim() == 2:
+                    images_spatial_crop = images_spatial_crop.unsqueeze(0)
+
+                item_has_local_crops = (
+                    [has_local_crops[idx]] if has_local_crops is not None else None
+                )
+                vision_feature_lists.extend(
+                    self._pixel_values_to_embedding(
+                        pixel_values=pixel_values,
+                        images_crop=images_crop,
+                        images_spatial_crop=images_spatial_crop,
+                        has_local_crops=item_has_local_crops,
+                    )
+                )
+
+            return torch.cat(vision_feature_lists, dim=0).type(target_dtype)
+
         pixel_values = torch.stack([item.feature for item in mm_items], dim=0).type(
             target_dtype
         )
