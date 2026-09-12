@@ -1,0 +1,43 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32475",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced that SchedulerKvEventsPublisher emitted max_total_num_tokens directly as kv_total_blocks and scaled the same token capacity for kv_active_blocks. The scheduler now passes page_size to the publisher, which reports both fields using max_total_num_tokens // page_size. Added a regression for the reported page_size=16 example plus page_size=1, empty-cache, and partial-trailing-page boundaries.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python (direct emit_kv_metrics reproduction; output in reports/j-0fdd5b6f6a37/raw/direct-reproduction-before.log)",
+      "exit_code": 0,
+      "what_was_measured": "On the base implementation, max_total_num_tokens=8192 and token_usage=0.5 emitted kv_total_blocks=8192 and kv_active_blocks=4096; the page_size=16 references are 512 and 256."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py (before production fix)",
+      "exit_code": 1,
+      "what_was_measured": "The added regression failed before the fix because SchedulerKvEventsPublisher had no page_size input; all four page-unit cases failed. Raw output is in reports/j-0fdd5b6f6a37/raw/regression-before.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_kv_events_publisher.py",
+      "exit_code": 0,
+      "what_was_measured": "One test and four subtests passed: page_size=16 at 50% usage, page_size=1 compatibility, zero active usage, and floor division for a partial trailing page. Raw output is in reports/j-0fdd5b6f6a37/raw/regression-after.log."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-0fdd5b6f6a37/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_output_sender.py test/registered/unit/disaggregation/test_kv_events.py",
+      "exit_code": 0,
+      "what_was_measured": "Adjacent scheduler-component and KV-event tests passed: 16 tests and 22 subtests. Raw output is in reports/j-0fdd5b6f6a37/raw/related-tests.log."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "what_was_measured": "The complete change has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and correction are CPU-side scheduler metric accounting and mocked socket serialization; no model, tensor, kernel, or GPU execution path is involved. No unrelated GPU smoke was used as evidence."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "No full serving/model run was performed because this unit conversion does not depend on weights or engine GPU execution.",
+    "The prepared interpreter does not include the ruff module; formatting was reviewed through the focused diff and git diff --check instead.",
+    "Two related upstream pull requests, https://github.com/sgl-project/sglang/pull/32499 and https://github.com/sgl-project/sglang/pull/32558, remain open; this task did not modify or notify upstream."
+  ]
+}
