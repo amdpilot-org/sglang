@@ -1,0 +1,55 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/23363",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2539",
+  "candidate_url": "https://github.com/amdpilot-org/sglang/pull/2519",
+  "candidate_commit": "a8cd992b18403cd79c7b1defed0d6862f91f813c",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate correctly fixes split end-marker leakage and passes its focused and legacy tests, but independent original-contract cases still fail. It is a partial fix, not a full resolution.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6017ea51aeeb/venv/bin/python /job/review_harness.py (base)",
+      "exit_code": 1,
+      "what_was_measured": "Reproduced split end-marker corruption on the recorded base; also measured all-marker one-character fragmentation, nested long JSON, singular section markers, and a 600,000-character unclosed section."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6017ea51aeeb/venv/bin/python /job/review_harness.py (candidate a8cd992b18403cd79c7b1defed0d6862f91f813c)",
+      "exit_code": 0,
+      "what_was_measured": "The required split-end assertion passed. Independent observations still failed one-character marker fragmentation, singular-marker cleanliness, and bounded unclosed-section handling."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6017ea51aeeb/venv/bin/python -m pytest -q test/registered/function_call/test_kimik2_detector.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 63 tests and 7 subtests passed."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6017ea51aeeb/venv/bin/python -m pytest -q test/registered/unit/function_call/test_function_call_parser.py -k KimiK2Detector",
+      "exit_code": 0,
+      "what_was_measured": "Legacy compatibility selection: 6 passed, 237 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6017ea51aeeb/venv/bin/python -c 'import sglang.srt.function_call.kimik2_detector as m; print(m.__file__)'",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed import from candidate repository source: /job/repo/python/sglang/srt/function_call/kimik2_detector.py."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The defect and candidate change are pure Python parser behavior; no GPU execution was relevant or claimed. Environment inspection found one AMD Instinct MI350X (assigned gfx950)."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "One-character-at-a-time fragmentation of the complete wire format yields zero calls and leaks markers into normal_text.",
+    "An unclosed section containing 600,000 argument characters remains buffered in full (600,072 bytes) and emits no normal text; no configurable safety valve exists.",
+    "Singular K2-Thinking section markers tool_call_section_begin/tool_call_section_end remain in normal_text instead of being recognized or stripped.",
+    "Explicit cross-request detector reset/isolation is not added by the candidate; current_tool_id remains advanced after a completed section."
+  ],
+  "remaining_limitations": [
+    "No Kimi-K2/K2.5 weights were available, so model semantic accuracy and real token emission were not tested.",
+    "No HTTP client/serving-path or multi-turn agent UI reproduction was performed; deterministic parser increments were tested directly.",
+    "The available single gfx950 AMD GPU differs from the reported 8x H100/H200/B200 environments; distributed behavior is unverified.",
+    "No native code changed, and therefore no native rebuild was applicable."
+  ]
+}
