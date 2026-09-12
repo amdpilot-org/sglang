@@ -115,8 +115,10 @@ class NcclRmaCommunicator:
         prev_rank = (self.rank - 1) % self.world_size
         next_win = handles[next_rank]
 
-        # ncclPutSignal copies from a local buffer; write the marker into our
-        # own warm-up buffer and use it as the source.
+        # Keep the receive slot (offset 0) disjoint from the local source slot
+        # (offset 4). Otherwise the predecessor can overwrite our source while
+        # the proxy is still reading it.
+        source_ptr = buf + 4
         cudart = self._cudart()
         host = (ctypes.c_int32 * 1)(self.rank + 1)
         stream = self.pynccl._resolve_stream()
@@ -129,11 +131,15 @@ class NcclRmaCommunicator:
             ctypes.c_void_p,
         ]
         cudart.cudaMemcpyAsync.restype = ctypes.c_int
-        cudart.cudaMemcpyAsync(buf, ctypes.cast(host, ctypes.c_void_p), 4, 1, sptr)
+        result = cudart.cudaMemcpyAsync(
+            source_ptr, ctypes.cast(host, ctypes.c_void_p), 4, 1, sptr
+        )
+        if result != 0:
+            raise RuntimeError(f"cudaMemcpyAsync H2D failed with code {result}")
         stream.synchronize()
 
         self.pynccl.put_signal(
-            buf,
+            source_ptr,
             1,
             _NCCL_INT32,
             peer=next_rank,
@@ -142,12 +148,16 @@ class NcclRmaCommunicator:
             stream=stream,
         )
 
-        descs_ptr, n = PyNcclCommunicator.make_wait_descs([(prev_rank, 1)])
-        self.pynccl.wait_signal(descs_ptr, n, stream=stream)
+        descs = PyNcclCommunicator.make_wait_descs([(prev_rank, 1)])
+        self.pynccl.wait_signal(ctypes.addressof(descs), len(descs), stream=stream)
         stream.synchronize()
 
         out = (ctypes.c_int32 * 1)()
-        cudart.cudaMemcpyAsync(ctypes.cast(out, ctypes.c_void_p), buf, 4, 2, sptr)
+        result = cudart.cudaMemcpyAsync(
+            ctypes.cast(out, ctypes.c_void_p), buf, 4, 2, sptr
+        )
+        if result != 0:
+            raise RuntimeError(f"cudaMemcpyAsync D2H failed with code {result}")
         stream.synchronize()
         got = out[0]
         expected = prev_rank + 1

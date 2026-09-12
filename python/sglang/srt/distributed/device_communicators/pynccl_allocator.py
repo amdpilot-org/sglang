@@ -247,11 +247,12 @@ def get_nccl_mem_pool() -> torch.cuda.MemPool:
         torch.distributed.barrier()
 
         nccl_allocator_libname = "nccl_allocator"
+        nccl_link_flag = "-lrccl" if torch.version.hip is not None else "-lnccl"
         lib_path = torch.utils.cpp_extension.load_inline(
             name=nccl_allocator_libname,
             cpp_sources=nccl_allocator_source,
             with_cuda=True,
-            extra_ldflags=["-lnccl"],
+            extra_ldflags=[nccl_link_flag],
             verbose=True,
             is_python_module=False,
             build_directory=out_dir,

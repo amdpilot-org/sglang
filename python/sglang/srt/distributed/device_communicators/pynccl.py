@@ -475,8 +475,7 @@ class PyNcclCommunicator:
         n_desc: int,
         stream: Optional[torch.cuda.Stream] = None,
     ):
-        """Wait for signals described by n_desc contiguous ncclWaitSignalDesc_t
-        at descs_ptr (built via make_wait_descs)."""
+        """Wait for ``n_desc`` contiguous ``ncclWaitSignalDesc_t`` values."""
         stream = stream or self._resolve_stream()
         return self.nccl.ncclWaitSignal(
             n_desc,
@@ -486,41 +485,33 @@ class PyNcclCommunicator:
         )
 
     def win_get_user_ptr(self, window):
-        out = buffer_type()
-        self.nccl.ncclWinGetUserPtr(self.comm, window, ctypes.byref(out))
-        return out.value
+        return self.nccl.ncclWinGetUserPtr(self.comm, window).value
 
     def nccl_mem_alloc(self, size: int) -> int:
         """Allocate a symmetric-memory buffer (ncclMemAlloc); eligible for
         window registration. Free with nccl_mem_free."""
-        ptr = buffer_type()
-        self.nccl.ncclMemAlloc(ctypes.byref(ptr), size)
-        return ptr.value
+        return self.nccl.ncclMemAlloc(size).value
 
     def nccl_mem_free(self, ptr: int) -> None:
         if ptr:
             self.nccl.ncclMemFree(buffer_type(ptr))
 
     def get_peer_device_pointer(self, window, offset: int, peer: int):
-        out = buffer_type()
-        self.nccl.ncclGetPeerDevicePointer(window, offset, peer, ctypes.byref(out))
-        return out.value
+        return self.nccl.ncclGetPeerDevicePointer(window, offset, peer).value
 
     @staticmethod
     def make_wait_descs(peers_opcnt: Sequence[Tuple[int, int]]):
-        """Build a contiguous ncclWaitSignalDesc_t[] buffer for wait_signal.
-        peers_opcnt: [(peer_rank, op_cnt), ...]; returns (buffer_ptr, n_desc)."""
-        import numpy as np
-
+        """Build an owned contiguous descriptor array for ``wait_signal``."""
         n_desc = len(peers_opcnt)
-        dtype = np.dtype(
-            [("op_cnt", "i4"), ("peer", "i4"), ("sig_idx", "i4"), ("ctx", "i4")]
+        from sglang.srt.distributed.device_communicators.pynccl_wrapper import (
+            ncclWaitSignalDesc_t,
         )
-        arr = np.zeros(n_desc, dtype=dtype)
+
+        arr = (ncclWaitSignalDesc_t * n_desc)()
         for i, (peer, op_cnt) in enumerate(peers_opcnt):
-            arr[i]["peer"] = peer
-            arr[i]["op_cnt"] = op_cnt
-        return np.ascontiguousarray(arr).ctypes.data, n_desc
+            arr[i].peer = peer
+            arr[i].op_cnt = op_cnt
+        return arr
 
     def make_nccl_config(
         self, num_rma_ctx: int = NCCL_CONFIG_UNDEF_INT
