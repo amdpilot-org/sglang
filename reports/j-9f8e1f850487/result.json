@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36105",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "At the recorded base, the real sglang console entry function rejected --config before YAML model-path parsing. At exact candidate commit 9038ebdca6547819590298996112fa2f59309bab, the existing ConfigArgumentMerger supplies the YAML model path for backend detection; the candidate regression and independent dispatch/precedence/boundary cases passed.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f8e1f850487/venv/bin/python -c 'import sys; from sglang.cli.main import main; sys.argv=[\"sglang\",\"serve\",\"--config\",\"/job/review-evidence/base/config.yaml\"]; main()' (base)",
+      "exit_code": 1,
+      "what_was_measured": "The actual registered console entry function and serve implementation failed before server argument parsing with 'Error: --model-path is required', reproducing the original issue."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f8e1f850487/venv/bin/python -m pytest -q test/registered/unit/cli/test_serve_backends.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "All 17 focused CLI/backend tests passed at the exact candidate commit, including its config-only regression, CLI precedence, alias, malformed-config, and missing-config cases."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-9f8e1f850487/venv/bin/python /job/review-evidence/candidate/independent_cases.py (candidate)",
+      "exit_code": 0,
+      "what_was_measured": "Independent real-entrypoint dispatch showed YAML-only model_path and host reaching ServerArgs; separate assertions verified explicit CLI precedence, YAML model alias support, and absent/malformed model boundaries. Only the final run_server call was captured."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No model weights were loaded and no HTTP request or inference was executed; verification ends at the real ServerArgs launch boundary.",
+    "The prepared environment is ROCm 7.2/gfx950 rather than the reporter's CUDA 13.0 container, although the changed code is architecture-neutral Python argument handling.",
+    "The prepared virtual environment had no installed sglang console executable; the registered entry function sglang.cli.main:main was invoked with equivalent exact argv.",
+    "No native rebuild was performed because the candidate changes only Python, tests, and reports and repository-environment.json declares no native artifact."
+  ]
+}
