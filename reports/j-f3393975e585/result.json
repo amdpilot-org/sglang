@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/36822",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced the GPTQ Marlin MoE BF16 scale dtype mismatch, reversed TP act-order w2 scale allocation, and missing full-table loader behavior in the checked-out implementation. Scale parameters now follow params_dtype; desc_act=True allocates and loads the full w2 scale table while desc_act=False retains per-rank sharding.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-f3393975e585/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py (before source fix)",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before regression: BF16 scales were FP16, both TP=2 act-order shape cases were reversed, and the w2 loader rejected full-table loading (4 failed, 1 passed). Raw output: reports/j-f3393975e585/regression-before.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f3393975e585/venv/bin/python -m pytest -q test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after regression and boundary cases for FP16/BF16 allocation, TP=2 desc_act false/true shapes, and sharded/full w2 table loading (5 passed). Raw output: reports/j-f3393975e585/regression-after.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f3393975e585/venv/bin/python -m pre_commit run --files python/sglang/srt/layers/quantization/gptq/schemes/gptq_moe.py python/sglang/srt/layers/moe/fused_moe_triton/layer.py test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py",
+      "exit_code": 0,
+      "what_was_measured": "Repository formatting, lint, syntax, and registered-test CI metadata checks passed. Raw output: reports/j-f3393975e585/pre-commit.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-f3393975e585/venv/bin/python hardware probe",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed one AMD Instinct MI350X/gfx950-class ROCm device is visible; raw output: reports/j-f3393975e585/hardware.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The reported two-rank CUDA Marlin serving workload and NaN logits were not executed because only one AMD ROCm GPU is assigned and the model weights are unavailable.",
+    "The regression validates the precise dtype, tensor-shape, metadata, and loader-sharding defects in the actual implementation, but does not establish end-to-end model semantic accuracy."
+  ]
+}

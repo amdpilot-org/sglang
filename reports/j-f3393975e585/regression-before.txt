@@ -1,0 +1,134 @@
+.FFFF                                                                    [100%]
+=================================== FAILURES ===================================
+________________ test_scales_follow_params_dtype[params_dtype1] ________________
+
+params_dtype = torch.bfloat16
+
+    @pytest.mark.parametrize("params_dtype", [torch.float16, torch.bfloat16])
+    def test_scales_follow_params_dtype(params_dtype):
+        layer = torch.nn.Module()
+        layer.moe_tp_size = 1
+        _make_scheme(desc_act=False).create_weights(
+            layer=layer,
+            num_experts=2,
+            hidden_size=256,
+            intermediate_size_per_partition=128,
+            params_dtype=params_dtype,
+        )
+    
+>       assert layer.w13_scales.dtype == params_dtype
+E       assert torch.float16 == torch.bfloat16
+E        +  where torch.float16 = Parameter containing:\ntensor([[[-2.3193e-03,  1.3914e-03,  0.0000e+00,  ...,  7.8888e-03,\n           8.0566e-03,  4.90... [ 8.0566e-03,  8.0795e-03,  1.6090e+03,  ...,  3.8040e+03,\n           4.4192e+04,  4.4672e+04]]], dtype=torch.float16).dtype
+E        +    where Parameter containing:\ntensor([[[-2.3193e-03,  1.3914e-03,  0.0000e+00,  ...,  7.8888e-03,\n           8.0566e-03,  4.90... [ 8.0566e-03,  8.0795e-03,  1.6090e+03,  ...,  3.8040e+03,\n           4.4192e+04,  4.4672e+04]]], dtype=torch.float16) = Module().w13_scales
+
+test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py:39: AssertionError
+____________ test_w2_scale_shape_matches_tp_loading[False-1-False] _____________
+
+desc_act = False, expected_groups = 1, load_full = False
+
+    @pytest.mark.parametrize(
+        ("desc_act", "expected_groups", "load_full"),
+        [(False, 1, False), (True, 2, True)],
+    )
+    def test_w2_scale_shape_matches_tp_loading(desc_act, expected_groups, load_full):
+        layer = torch.nn.Module()
+        layer.moe_tp_size = 2
+        _make_scheme(desc_act=desc_act).create_weights(
+            layer=layer,
+            num_experts=2,
+            hidden_size=256,
+            intermediate_size_per_partition=128,
+            params_dtype=torch.bfloat16,
+        )
+    
+>       assert layer.w2_scales.shape == (2, expected_groups, 256)
+E       assert torch.Size([2, 2, 256]) == (2, 1, 256)
+E         
+E         At index 1 diff: 2 != 1
+E         Use -v to get more diff
+
+test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py:58: AssertionError
+_____________ test_w2_scale_shape_matches_tp_loading[True-2-True] ______________
+
+desc_act = True, expected_groups = 2, load_full = True
+
+    @pytest.mark.parametrize(
+        ("desc_act", "expected_groups", "load_full"),
+        [(False, 1, False), (True, 2, True)],
+    )
+    def test_w2_scale_shape_matches_tp_loading(desc_act, expected_groups, load_full):
+        layer = torch.nn.Module()
+        layer.moe_tp_size = 2
+        _make_scheme(desc_act=desc_act).create_weights(
+            layer=layer,
+            num_experts=2,
+            hidden_size=256,
+            intermediate_size_per_partition=128,
+            params_dtype=torch.bfloat16,
+        )
+    
+>       assert layer.w2_scales.shape == (2, expected_groups, 256)
+E       assert torch.Size([2, 1, 256]) == (2, 2, 256)
+E         
+E         At index 1 diff: 1 != 2
+E         Use -v to get more diff
+
+test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py:58: AssertionError
+____________ test_w2_loader_supports_sharded_and_full_scale_tables _____________
+
+    def test_w2_loader_supports_sharded_and_full_scale_tables():
+        loader = SimpleNamespace(
+            quant_config=None,
+            use_padded_loading=False,
+            use_presharded_weights=False,
+            use_triton_kernels=False,
+            moe_tp_size=2,
+        )
+        loaded_weight = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    
+        sharded = torch.empty(2, 4)
+        FusedMoE._load_w2(
+            loader,
+            expert_data=sharded,
+            shard_dim=0,
+            shard_id="w2",
+            loaded_weight=loaded_weight,
+            tp_rank=1,
+        )
+        assert torch.equal(sharded, loaded_weight[2:])
+    
+        full = torch.empty_like(loaded_weight)
+>       FusedMoE._load_w2(
+            loader,
+            expert_data=full,
+            shard_dim=0,
+            shard_id="w2",
+            loaded_weight=loaded_weight,
+            tp_rank=1,
+            load_full=True,
+        )
+E       TypeError: FusedMoE._load_w2() got an unexpected keyword argument 'load_full'
+
+test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py:84: TypeError
+=============================== warnings summary ===============================
+../../opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434
+  /opt/venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1434: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+../../opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15
+  /opt/venv/lib/python3.12/site-packages/Cython/Distutils/old_build_ext.py:15: DeprecationWarning: dep_util is Deprecated. Use functions from setuptools instead.
+    from distutils.dep_util import newer, newer_group
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py::test_scales_follow_params_dtype[params_dtype1]
+FAILED test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py::test_w2_scale_shape_matches_tp_loading[False-1-False]
+FAILED test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py::test_w2_scale_shape_matches_tp_loading[True-2-True]
+FAILED test/registered/unit/layers/quantization/test_gptq_marlin_moe_loading.py::test_w2_loader_supports_sharded_and_full_scale_tables
+4 failed, 1 passed, 17 warnings in 11.92s
