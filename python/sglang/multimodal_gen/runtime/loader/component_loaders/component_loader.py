@@ -41,7 +41,6 @@ from sglang.multimodal_gen.runtime.loader.utils import (
     hf_to_custom_state_dict,
     initialize_model,
     load_model_state_dict,
-    model_construction_lock,
 )
 from sglang.multimodal_gen.runtime.loader.weight_load_plan import WeightLoadPlan
 from sglang.multimodal_gen.runtime.loader.weight_utils import (
@@ -307,21 +306,23 @@ class ComponentLoader(ABC):
         component_attn_name: str | None,
         require_backend_selection: bool,
     ) -> AutoModel:
-        # Hugging Face/accelerate model construction can temporarily patch
-        # nn.Module registration process-wide. Keep native construction isolated
-        # from customized model construction in other component loader threads.
-        with model_construction_lock:
-            with self.component_attention_backend_context(
-                attn_backend,
-                component_attn_name,
-                require_backend_selection,
-            ):
-                component = self.load_native(
-                    component_model_path,
-                    server_args,
-                    transformers_or_diffusers,
-                    component_name,
-                )
+        # Do not serialize the complete native from_pretrained call here: it includes
+        # checkpoint I/O and weight materialization, which are the expensive phases
+        # parallel component loading is intended to overlap. SGLang constructors that
+        # mutate process-global PyTorch state take model_construction_lock in their
+        # narrower construction contexts (for example set_default_torch_dtype and
+        # initialize_model).
+        with self.component_attention_backend_context(
+            attn_backend,
+            component_attn_name,
+            require_backend_selection,
+        ):
+            component = self.load_native(
+                component_model_path,
+                server_args,
+                transformers_or_diffusers,
+                component_name,
+            )
         return component
 
     def load(
