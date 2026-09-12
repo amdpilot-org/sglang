@@ -1,0 +1,31 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30122",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced issue bug 3 in the current checkout: GGUFMoEMethod.apply raised AttributeError before invoking the GGUF MoE kernel because it asserted on a fused_experts attribute that SGLang's FusedMoEMethodBase never defines. Removed the stale assertion and added focused coverage for successful kernel dispatch/output propagation and the independent unsupported-activation boundary.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b969a0ab5e43/venv/bin/python < focused GGUFMoEMethod.apply reproducer",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before reproduction of the first MoE apply call; it raised AttributeError: 'GGUFMoEMethod' object has no attribute 'fused_experts'. Raw output: reports/j-b969a0ab5e43/raw/failing_before.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b969a0ab5e43/venv/bin/python -m pytest -q test/registered/quant/test_gguf.py -k TestGGUFMoEMethod",
+      "exit_code": 0,
+      "what_was_measured": "Two focused regressions passed: GGUF MoE apply forwards weights/top-k metadata and returns the kernel output, while non-SiLU activation is rejected before kernel invocation. Raw output: reports/j-b969a0ab5e43/raw/pytest_after.txt"
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-b969a0ab5e43/venv/bin/python -m compileall -q python/sglang/srt/layers/quantization/gguf.py test/registered/quant/test_gguf.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed source and regression test compile successfully. Raw output: reports/j-b969a0ab5e43/raw/compileall.txt"
+    },
+    {
+      "command": "ROCR_VISIBLE_DEVICES=0 PYTHONPATH=python /tmp/amdpilot-repo-j-b969a0ab5e43/venv/bin/python < GPU inventory script",
+      "exit_code": 0,
+      "what_was_measured": "Confirmed one assigned AMD Instinct MI355X GPU with gfx950:sramecc+:xnack- under Torch 2.11.0+rocm7.2. Raw output: reports/j-b969a0ab5e43/raw/gpu_environment.txt"
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_limitations": "The assigned gfx950 device uses ROCm/HIP, but this checkout explicitly warns that GGUF quantization is supported only on CUDA and MUSA. No Qwen3-235B-A22B weights were available. Therefore no full-model GGUF inference, CUDA kernel execution, TP=2, or multi-node reproduction was claimed. The fix covers the architecture-independent bug 3 first-forward AttributeError only; the other eight reported bugs were inspected for scope but not claimed fixed. No native code changed, so no native rebuild was applicable."
+}
