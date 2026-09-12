@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/1763",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/3225",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3210",
+  "candidate_commit": "c1723a1a501e1241bfaceaac0480c6ae86d2fdff",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate is a partial implementation with useful test-only hardening: it adds an experimental SageAttention adapter and correctly fails closed for SM100. It does not verify the original issue's quantized-kernel accuracy or approximately 2x inference-speed motivation. Independent source inspection also found that the exact documented SageAttention revision cannot select source-build targets 10.0 or 12.0 because its SUPPORTED_ARCHS literal evaluates to 10.012.0; the candidate admits and implicitly documents SM120 despite that installation counterexample.",
+  "tests": [
+    {
+      "command": "on base 358c163: construct the real ServerArgs CLI and parse --attention-backend sage; import sglang.srt.layers.attention.sage_attention_backend",
+      "exit_code": 0,
+      "what_was_measured": "Reproduced the original missing feature: argparse rejected sage and the backend module was absent. The command itself exited successfully after asserting/reporting both expected failures."
+    },
+    {
+      "command": "git switch --detach c1723a1a501e1241bfaceaac0480c6ae86d2fdff && python -m pytest -q test/registered/unit/layers/test_sage_attention_backend.py test/registered/unit/server_args/test_server_args.py -k 'sage or SageAttentionAdmission'",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite: 10 passed. This covers adapter validation, mocked SDPA layout/GQA behavior, ROCm rejection, and mocked SM100 admission/constructor rejection. It does not execute SageAttention."
+    },
+    {
+      "command": "candidate CLI parse with --prefill-attention-backend sage --decode-attention-backend fa3; construct SageAttentionBackend on the assigned node; importlib.find_spec('sageattention')",
+      "exit_code": 0,
+      "what_was_measured": "The exact candidate CLI accepts the documented split configuration. Actual construction fails closed on ROCm, and no SageAttention package is installed in the pinned interpreter."
+    },
+    {
+      "command": "clone thu-ml/SageAttention outside JOB_WORKDIR, checkout d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4, inspect setup.py and sageattention/core.py, and evaluate SUPPORTED_ARCHS with ast.literal_eval",
+      "exit_code": 0,
+      "what_was_measured": "The public dispatcher has SM80/86/89/90/120 branches and raises for SM100. Independently, the build target set is ['10.012.0', '8.0', '8.6', '8.9', '9.0'], so both '10.0' and '12.0' source targets are rejected before compilation."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_evidence": "One AMD Instinct MI350X (gfx950), Torch 2.11.0+rocm7.2. Candidate FP16/BF16 tests ran on this GPU but replaced sageattn with PyTorch SDPA; no SageAttention native or INT8 Q/K kernel executed.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "At pinned SageAttention commit d9704247a5139ab4c03bf7fc6b35cc0e2cbb5ea4, setup.py's missing comma combines '10.0' and '12.0' into '10.012.0'. A source install targeting SM120 is rejected, but the candidate admits SM120 and documents only SM100 as excluded.",
+    "No supported NVIDIA architecture was available, so the documented dependency was not built or imported and no INT8 Q/K kernel was executed.",
+    "The numerical tests substitute full-precision PyTorch SDPA for sageattn; they cannot establish quantized SageAttention accuracy.",
+    "No end-to-end serving, model-quality, long-context, throughput, latency, or memory result establishes the original approximately 2x speed claim.",
+    "Dense paged-KV gathering and materialized GQA/MQA expansion remain unmeasured and may erase kernel gains, especially for decode or non-recommended configurations."
+  ],
+  "remaining_limitations": [
+    "The assigned GPU is AMD Instinct MI350X, while SageAttention is NVIDIA CUDA-only.",
+    "There is no CUDA toolkit in the pinned ROCm interpreter, so an honest native SageAttention rebuild is architecture-blocked. The candidate changes no SGLang C/C++/CUDA/HIP source, so no SGLang native rebuild applies.",
+    "No model weights were used. The tiny Llama fixture would validate transport/engine execution only and could not qualify a CUDA-only kernel on this node.",
+    "SM100 dispatcher behavior and SM120 build behavior were established from the exact pinned source plus candidate admission tests, not execution on those architectures."
+  ]
+}
