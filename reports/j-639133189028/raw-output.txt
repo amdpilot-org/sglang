@@ -1,0 +1,64 @@
+Prepared checkout
+=================
+Repository: /job/repo
+Branch: amdpilot/j-639133189028
+Base/HEAD before report commit: 358c163250ad3b1f62939b01ce1314a0a31a0365
+Python: /tmp/amdpilot-repo-j-639133189028/venv/bin/python
+
+GPU and numerical probe
+=======================
+{
+  "torch": "2.11.0+rocm7.2",
+  "hip": "7.2.26015",
+  "device_count": 1,
+  "device_name": "AMD Instinct MI355X",
+  "arch": "gfx950:sramecc+:xnack-",
+  "tilelang_installed": true,
+  "max_abs_error": 7.801873202595289e-06,
+  "max_rel_error": 0.0011979164284695852,
+  "finite": true
+}
+
+Focused unit command
+====================
+PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-639133189028/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_dp_attn.py test/registered/unit/managers/test_prefill_delayer_high_watermark.py
+
+.........                                                             [100%]
+9 passed, 17 warnings, 3 subtests passed in 20.30s
+exit_code=0
+
+Distributed scheduler-negotiation command
+=========================================
+PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-639133189028/venv/bin/python -m pytest -q test/registered/scheduler/test_prefill_delayer.py::TestPrefillDelayerNegotiate::test_negotiate
+
+.                                                                        [100%]
+1 passed, 17 warnings in 19.41s
+exit_code=0
+
+Issue and related-change inspection
+===================================
+Upstream issue state: OPEN
+Upstream updated_at: 2026-08-16T17:34:19Z
+Upstream response: exact 8x MI355X setup did not hang under attempted concurrent
+decode and 900k-token prefill workloads; exact reporter workload requested.
+
+PR 35640: Coordinate FullCG prefill across DP-attention ranks
+URL: https://github.com/sgl-project/sglang/pull/35640
+Merged: 2026-08-26
+Claimed scope: all-rank prefill CUDA-graph admission and shared padding.
+
+PR 34474: guard Qwen3.5 attention layers against empty DP-attention batch
+URL: https://github.com/sgl-project/sglang/pull/34474
+Merged: 2026-08-16
+Claimed scope: Qwen3.5 empty-batch reshape crash, not a GLM TileLang stall.
+
+Searches for merged PRs with TileLang + DP attention and for DP-attention
+hang/deadlock fixes returned no directly matching fix.
+
+Reproduction blocker
+====================
+The source report requires 8 GPUs and GLM-5.2 MXFP4 weights. The prepared host
+has exactly 1 visible GPU, and the private runtime contains only the prepared
+venv/cache (no model weights). No TP8/DP8 server was launched because it cannot
+form the reported collective. The tiny-Llama fixture was not used because it
+cannot qualify DSA, GLM-5.2, or an eight-rank distributed workload.

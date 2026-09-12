@@ -1,0 +1,33 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33978",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "environment_blocked",
+  "summary": "The reported combined-server TileLang DP-attention prefill hang could not be reproduced in the assigned environment. The report requires GLM-5.2 MXFP4 and an eight-rank TP8/DP8 collective, while the prepared host exposes one MI355X (gfx950) and contains no model weights. Current main has all-rank scheduler metadata, prefill-delayer negotiation, and FullCG prefill coordination, but no inspected change claims to fix issue #33978. The upstream issue also records an independent failure to reproduce on 8x MI355X. No source correction was made because no issue-specific failing case or causal defect was established.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-639133189028/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_dp_attn.py test/registered/unit/managers/test_prefill_delayer_high_watermark.py",
+      "exit_code": 0,
+      "what_was_measured": "Current single-process scheduler metadata, DP1 gather-skip, prefill CUDA-graph vote boundaries, and prefill-delayer high-watermark behavior: 9 passed, 3 subtests passed. This is not a reproduction of the distributed TileLang hang."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-639133189028/venv/bin/python -m pytest -q test/registered/scheduler/test_prefill_delayer.py::TestPrefillDelayerNegotiate::test_negotiate",
+      "exit_code": 0,
+      "what_was_measured": "Four-process Gloo negotiation across mixed/all/none-prefillable boundary cases: 1 passed. This exercises CPU scheduler agreement, not RCCL, TileLang kernels, GLM-5.2, or combined prefill/decode execution."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-639133189028/venv/bin/python - <<'PY' ... torch.cuda device probe and deterministic FP32 GEMM compared with a CPU FP64 reference ... PY",
+      "exit_code": 0,
+      "what_was_measured": "ROCm 7.2 / torch 2.11.0+rocm7.2 exposes exactly one AMD Instinct MI355X (gfx950); TileLang imports; a 257x129 by 129x73 GPU GEMM was finite with max absolute error 7.801873202595289e-06 versus CPU FP64. This establishes GPU availability only, not the reported distributed hang."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "A deterministic numerical GEMM executed on the assigned AMD Instinct MI355X gfx950 under ROCm 7.2. The device count was 1, so the required eight-rank collective was impossible.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Only one GPU was assigned; the report requires TP8/DP8 on eight MI355X GPUs, so no cross-rank RCCL or TileLang collective could be exercised.",
+    "GLM-5.2 MXFP4 weights were not present. The qualified tiny-Llama fixture was not used because it cannot qualify the DSA model architecture or a distributed workload.",
+    "The reporter did not provide the exact long-context workload. The upstream issue records that another investigator could not reproduce the hang on the stated 8x MI355X setup and requested that workload.",
+    "Passing scheduler coordination tests and a single-GPU numerical check do not establish that issue #33978 is fixed.",
+    "No failing-before/passing-after regression exists because the original failure was not reproduced and no causal defect was established."
+  ]
+}
