@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/33268",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "d38922c9de6874789c758a6931895eb142332a77",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes several backend namespaces and passes its regression, but it threads the host storage dtype rather than the resolved KV cache format. FP8 E4M3 and FP8 E5M2 therefore still collide as torch.uint8. UMBP also remains dtype-agnostic.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c68176e1511b/venv/bin/python /job/review-evidence/base/reproduce_original.py",
+      "exit_code": 1,
+      "what_was_measured": "At the recorded base, intended bf16 and fp8 runs generated the identical key page-1_DeepSeek-V4-Flash, reproducing the original collision."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c68176e1511b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_hicache_kv_cache_dtype_key.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, 18 candidate regressions passed, including direct string suffix cases and mocked hf3fs read/write isolation."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c68176e1511b/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mem_pool_host.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate, 24 related registered tests passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-c68176e1511b/venv/bin/python /job/review-evidence/candidate/adversarial_store_dtype.py",
+      "exit_code": 1,
+      "what_was_measured": "The real _generate_storage_config data source produced torch.uint8 for both FP8 E4M3 and E5M2, yielding identical page-1_model_0_1_dtype_torch.uint8 keys."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The relevant behavior is CPU-side key construction. Hardware discovery found AMD Instinct MI350X, gfx950:sramecc+:xnack-, but no unrelated GPU smoke is claimed as proof."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Two runs using FP8 E4M3 and FP8 E5M2 still collide because both HostKVCache instances expose the storage dtype torch.uint8 to _generate_storage_config.",
+    "UMBPStore config_prefix omits kv_cache_dtype, and the UMBP direct linker constructs HiCacheStorageConfig without the new field."
+  ],
+  "remaining_limitations": [
+    "No external hf3fs, Mooncake, NIXL, EIC, or UMBP service was available for end-to-end integration testing.",
+    "FlexKV and LMCache use external connector/client behavior and were not integration-tested; their collision behavior remains unverified.",
+    "No model weights, serving-path run, or multi-node workload was used or claimed.",
+    "The candidate changes no native source and repository-environment.json declares native null, so no native rebuild was applicable."
+  ]
+}
