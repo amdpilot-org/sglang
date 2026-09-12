@@ -1,0 +1,39 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/35484",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Reproduced both independent-review counterexamples at candidate commit 3df72284c7a4fbfb906582ac86a2628dedc33788, preserved its DP/TP/PP Mooncake SSD isolation, and completed the directory identity with scheduler DP rank plus attention CP rank. Pure-DP replicas now receive distinct rank_<dp>_<tp>_<pp> directories, while attention-CP workers receive a conditional _cp<cp> suffix.",
+  "tests": [
+    {
+      "command": "cd /tmp/amdpilot-repo-j-0c58eb107cfd/candidate-worktree && /tmp/amdpilot-repo-j-0c58eb107cfd/venv/bin/python /tmp/amdpilot-repo-j-0c58eb107cfd/run_remaining_candidate.py",
+      "exit_code": 1,
+      "what_was_measured": "Exact candidate 3df72284 reproduced both review failures: pure-DP replicas selected rank_0_0_0 twice and attention-CP ranks 0/1 selected rank_0_0_0 twice; the candidate's DP-attention and TP/PP isolation checks passed first. Raw output: raw/candidate-counterexamples-before.txt."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0c58eb107cfd/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Five focused path/configuration regressions passed, covering direct-linker DP/CP propagation, pure DP, attention CP, existing TP/PP identity, non-CP naming compatibility, directory creation, and an unconfigured path."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-0c58eb107cfd/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mooncake_group_semantics.py test/registered/unit/mem_cache/test_mooncake_standalone_dummy_mamba.py test/registered/unit/mem_cache/test_mooncake_tenant_config.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "Twenty-three registered Mooncake unit tests passed."
+    },
+    {
+      "command": "/opt/venv/bin/pre-commit run --files python/sglang/srt/managers/cache_controller.py python/sglang/srt/mem_cache/cache_init_params.py python/sglang/srt/mem_cache/hicache_storage.py python/sglang/srt/mem_cache/kv_cache_builder.py python/sglang/srt/mem_cache/storage/mooncake_store/README.md python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_direct_linker.py python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py test/registered/unit/mem_cache/test_mooncake_ssd_offload_path.py",
+      "exit_code": 0,
+      "what_was_measured": "All applicable repository formatting, lint, registration, and source checks passed."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The prepared interpreter saw one AMD Instinct MI350X with torch 2.11.0+rocm7.2/HIP 7.2, but no GPU execution was used or claimed because the defect is deterministic Python rank propagation and filesystem path selection. See raw/environment.txt."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "DeepSeek-V4-Flash weights and the reported TP8 or multi-node deployment were unavailable.",
+    "No live Mooncake LOCAL_DISK bucket collision or restart-recovery workload was executed; tests use the actual SGLang path-selection implementation with a deterministic fake Mooncake client.",
+    "The Mooncake-side recovery/ownership change is outside this repository.",
+    "python/sglang/srt/mem_cache/storage/mooncake_store/test_mooncake_store.py is a manually configured live-store script rather than a self-contained pytest suite; collecting it directly failed because MOONCAKE_MASTER/MOONCAKE_CLIENT and its config fixture were absent. This was not treated as evidence for or against the source correction."
+  ]
+}

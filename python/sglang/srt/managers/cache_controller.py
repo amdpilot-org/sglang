@@ -731,6 +731,7 @@ class HiCacheController:
         attn_cp_rank, attn_cp_size = self.get_attn_cp_rank_and_size()
 
         return HiCacheStorageConfig(
+            dp_rank=self.dp_rank,
             tp_rank=self.tp_rank,
             tp_size=self.tp_size,
             pp_rank=self.pp_rank,

@@ -504,7 +504,19 @@ class MooncakeStore(HiCacheStorage, MooncakeBaseStore):
                 if self.config.enable_ssd_offload:
                     setup_kwargs["enable_ssd_offload"] = True
                 if self.config.ssd_offload_path is not None:
-                    setup_kwargs["ssd_offload_path"] = self.config.ssd_offload_path
+                    ssd_offload_path = self.config.ssd_offload_path
+                    if storage_config is not None:
+                        rank_directory = (
+                            f"rank_{storage_config.dp_rank}"
+                            f"_{storage_config.tp_rank}_{storage_config.pp_rank}"
+                        )
+                        if storage_config.attn_cp_size > 1:
+                            rank_directory += f"_cp{storage_config.attn_cp_rank}"
+                        ssd_offload_path = os.path.join(
+                            ssd_offload_path, rank_directory
+                        )
+                    os.makedirs(ssd_offload_path, exist_ok=True)
+                    setup_kwargs["ssd_offload_path"] = ssd_offload_path
                 if self.config.tenant_id != DEFAULT_TENANT_ID:
                     setup_kwargs["tenant_id"] = self.config.tenant_id
 
