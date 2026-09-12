@@ -129,6 +129,23 @@ class AttentionBackend(ABC):
         Default: no-op.
         """
 
+    def validate_preplanned_metadata_extent(self, forward_batch: ForwardBatch) -> None:
+        """Validate a non-replannable pre-plan against the execution extent."""
+        if forward_batch.has_stale_forward_metadata_plan():
+            num_tokens = (
+                forward_batch.input_ids.shape[0]
+                if forward_batch.input_ids is not None
+                else 0
+            )
+            raise RuntimeError(
+                "Stale non-replannable attention metadata: planned "
+                f"batch_size={forward_batch.forward_metadata_planned_bs}, "
+                f"num_tokens={forward_batch.forward_metadata_planned_num_tokens}; "
+                f"physical batch_size={forward_batch.batch_size}, "
+                f"num_tokens={num_tokens}. The backend must provide an explicit "
+                "validated execution-extent contract before attention or KV writes."
+            )
+
     supports_draft_extend_metadata_staging: bool = False
 
     def draft_extend_metadata_captured_in_graph(self) -> bool:
