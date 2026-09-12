@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/5979",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/3049",
+  "candidate_commit": "df6227fa7cc01d5e6fd84b84f8efa2dba3ad12b8",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "The base computes but discards the unrounded KV-only utilization ratio. The exact candidate exports it as sglang:kv_cache_usage_perc, preserves existing metrics, passes its regression suite and independent adversarial scheduler tests, and has internally consistent retained MI350X serving evidence.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4fe3ebab7085/venv/bin/python <base reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, get_kv_token_stats returned 0.123456 but SchedulerStats lacked kv_cache_usage_perc; legacy token_usage was 0.12."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4fe3ebab7085/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components/test_pool_stats_kv_usage.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression suite at exact commit: five plain, SWA, Mamba, combined hybrid, and precision cases passed."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4fe3ebab7085/venv/bin/python <independent adversarial script>",
+      "exit_code": 0,
+      "what_was_measured": "Independent 0/1 boundaries, full-vs-SWA dominance, unrounded precision, Mamba exclusion, source import paths, and Prometheus serialization."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-4fe3ebab7085/venv/bin/python -m pytest -q test/registered/unit/managers/scheduler_components",
+      "exit_code": 0,
+      "what_was_measured": "All 15 scheduler-component tests passed at the exact candidate commit."
+    },
+    {
+      "command": "Independent inspection of candidate-retained tiny-Llama server request, response, metrics, metadata, and log",
+      "exit_code": 0,
+      "what_was_measured": "On MI350X/gfx950, POST /generate and GET /metrics returned 200; kv_cache_usage_perc and full_token_usage both measured 0.01171875 during active execution."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Candidate-retained raw server evidence records AMD Instinct MI350X gfx950 execution with a successful generation and metrics scrape. The reviewer inspected and retained it but did not rerun the server probe."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "No end-to-end hybrid SWA or Mamba model was available; these semantics were independently exercised at the scheduler accounting boundary.",
+    "The tiny random Llama fixture does not validate semantic model accuracy or a different model architecture.",
+    "Only ROCm 7.2, Torch 2.11.0+rocm7.2, and AMD Instinct MI350X gfx950 evidence was available; CUDA and other architectures were not tested.",
+    "No native source changed, so a native rebuild and compiler/ISA validation were not applicable."
+  ]
+}
