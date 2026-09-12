@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/38513",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/657",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/639",
+  "candidate_commit": "2d784005479317580b5e07cff6c219a243ddc056",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The candidate fixes CudaSRTPlatform.supports_fp8() for controlled SM 7.5/8.0/8.9/9.0 probes and provides a numerically correct software GEMM for the channelwise fallback. It does not fully resolve the original issue: the per-tensor apply_fp8_linear path still unconditionally calls torch._scaled_mm, and supports_fp8() has no production callers in this checkout to turn the corrected capability result into an early refusal. Thus an FP8 linear with per-tensor activation and weight scales still reaches the unsupported native operation on SM75/SM80. The requested FP8 hardware warning was also not added to quantization documentation.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0782124a35/venv/bin/python <controlled base reproduction script>",
+      "exit_code": 0,
+      "what_was_measured": "On the prepared base, the actual imported CudaSRTPlatform API returned true for controlled capabilities 7.5, 8.0, 8.9, and 9.0; forcing torch._scaled_mm to fail made _apply_fallback_scaled_mm propagate the failure. Imported sources were under /job/repo/python/sglang. Raw output: /job/review-evidence-j-6a0782124a35/base_reproduction.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0782124a35/venv/bin/python -m pytest -q test/registered/unit/platforms/test_platform_interface.py",
+      "exit_code": 0,
+      "what_was_measured": "Exact candidate platform suite: 60 passed and 25 subtests passed, including controlled SM capability probes. Raw output: /job/review-evidence-j-6a0782124a35/candidate_platform_tests.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0782124a35/venv/bin/python -m pytest -q test/registered/quant/test_fp8_utils.py::TestApplyFp8LinearScaleDispatch::test_channelwise_fallback_does_not_require_scaled_mm",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression passed while torch._scaled_mm was forbidden. Raw output: /job/review-evidence-j-6a0782124a35/candidate_regression.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0782124a35/venv/bin/python <independent candidate adversarial GPU script>",
+      "exit_code": 1,
+      "what_was_measured": "Before a separate invalid-layout ROCm probe ended the combined script, the channelwise fallback matched an independent NumPy reference with max absolute error 0.0 for per-row and scalar activation scales, while apply_fp8_linear with per-tensor scales propagated 'native scaled_mm unavailable on SM75/80'. Raw output: /job/review-evidence-j-6a0782124a35/candidate_adversarial_gpu.txt"
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-6a0782124a35/venv/bin/python <valid-layout physical ROCm torch._scaled_mm probe>",
+      "exit_code": 0,
+      "what_was_measured": "On AMD Instinct MI350X with row-major A and column-major B, torch._scaled_mm returned a finite 16x16 float16 result. Raw output: /job/review-evidence-j-6a0782124a35/candidate_rocm_native_valid_layout.txt"
+    },
+    {
+      "command": "rg -n 'supports_fp8\\(' python",
+      "exit_code": 0,
+      "what_was_measured": "Only method definitions were found; no production consumer uses the corrected capability flag as an early FP8 load gate. Raw output: /job/review-evidence-j-6a0782124a35/source_audit.txt"
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Executed on one assigned AMD Instinct MI350X, reported capability (9, 5), torch 2.11.0+rocm7.2. The candidate channelwise fallback ran on GPU and matched NumPy; a valid-layout native ROCm torch._scaled_mm returned finite output."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With cutlass_fp8_supported=false and scalar input_scale/weight_scale, apply_fp8_linear enters its per-tensor branch and still calls torch._scaled_mm. A forced unsupported-kernel error propagates, representing the original SM75/SM80 failure class.",
+    "The corrected CudaSRTPlatform.supports_fp8() result is not consumed by production code in this checkout, so it does not itself provide the expected early SGLang refusal.",
+    "No quantization documentation warning for the SM89+ native FP8 GEMM requirement was added."
+  ],
+  "remaining_limitations": [
+    "No physical NVIDIA GPU was assigned. SM75/80/89/90 results are controlled probes through the actual platform API, not physical NVIDIA qualification.",
+    "The assigned GPU is AMD Instinct MI350X under ROCm 7.2; ROCm behavior was exercised physically, but it cannot establish NVIDIA compiler or ISA behavior.",
+    "The candidate changed only Python, tests, and reports. No C++, CUDA, HIP, FlyDSL, LLVM, or other native source changed, repository-environment.json declared native=null, and no native rebuild was applicable.",
+    "The combined adversarial script's final native probe used an invalid matrix layout and exited 1; the physical ROCm native result was rerun separately with the required layout and passed."
+  ],
+  "evidence_directory": "/job/review-evidence-j-6a0782124a35"
+}
