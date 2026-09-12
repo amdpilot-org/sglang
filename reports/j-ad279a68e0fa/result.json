@@ -1,0 +1,46 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/34772",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "2f7f86127908c8e7c766ecc070976330c45badc9",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "remaining_counterexamples": [],
+  "outcome": "candidate_verified",
+  "summary": "The recorded base still allowed non-quantized native Transformers fallback to materialize a CPU-offloaded text encoder before consulting the effective CPU-start policy. The exact candidate passes a CPU device_map into from_pretrained for component-offload and layerwise-offload CPU-start decisions, including indexed text-encoder keys, while preserving resident and quantized behavior.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-ad279a68e0fa/venv/bin/python /job/review_native_placement.py (base 358c163250ad3b1f62939b01ce1314a0a31a0365)",
+      "exit_code": 0,
+      "what_was_measured": "Failing-before structural reproduction: explicit/component-offload, layerwise-equivalent, and text_encoder_2 cases never queried should_start_component_on_cpu and passed no device_map. Resident behavior was also recorded; quantized loading retained its existing CUDA device map."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ad279a68e0fa/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_text_encoder_loader.py -k 'native_load_honors_cpu_start_during_from_pretrained or native_load_does_not_force_device_map_without_cpu_start or bitsandbytes_native_load_requires_resident_encoder' (candidate 2f7f86127908c8e7c766ecc070976330c45badc9)",
+      "exit_code": 0,
+      "what_was_measured": "Candidate regression and resident/quantized boundary coverage: 3 passed, 51 deselected."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ad279a68e0fa/venv/bin/python /job/review_native_placement.py (candidate 2f7f86127908c8e7c766ecc070976330c45badc9)",
+      "exit_code": 0,
+      "what_was_measured": "Independent adversarial policy cases: explicit/component offload, layerwise-equivalent, and text_encoder_2 each passed a CPU device_map; resident passed none; quantized precedence remained GPU-resident."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ad279a68e0fa/venv/bin/python /job/review_gpu_tiny_t5.py (candidate 2f7f86127908c8e7c766ecc070976330c45badc9)",
+      "exit_code": 0,
+      "what_was_measured": "Real local Transformers from_pretrained placement on AMD Instinct MI350X/gfx950: all parameters were on CPU and torch.cuda.memory_allocated remained 0 bytes before and after loading."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-ad279a68e0fa/venv/bin/python -m pytest -q python/sglang/multimodal_gen/test/unit/test_transformer_loader_fallback.py python/sglang/multimodal_gen/test/unit/test_component_loader_identity.py (candidate 2f7f86127908c8e7c766ecc070976330c45badc9)",
+      "exit_code": 0,
+      "what_was_measured": "Related fallback and component-identity coverage: 11 passed and 12 subtests passed."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Generated tiny T5 fixture loaded through the changed native Transformers path on AMD Instinct MI350X/gfx950 with ROCm 7.2; parameters stayed on CPU and PyTorch GPU allocation delta was 0 bytes.",
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers and Efficient-Large-Model/Sana_600M_512px_diffusers weights were unavailable, so the exact full diffusion fallback and denoising paths were not run.",
+    "The reporter used an 8GB NVIDIA RTX 4070 Laptop under CUDA/WSL2; the assigned device is a 256GB AMD Instinct MI350X/gfx950 under ROCm 7.2, so the exact CUDA OOM was not reproduced.",
+    "The tiny T5 fixture validates native Transformers placement and allocator behavior only, not model-architecture semantics or generation accuracy.",
+    "No native source changed; native rebuild was inapplicable."
+  ]
+}
