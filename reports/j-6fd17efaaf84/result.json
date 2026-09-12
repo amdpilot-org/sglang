@@ -1,0 +1,49 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/30122",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "candidate_commit": "87a8b5c3cc8f4de4c93c937c086612634786d60b",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate correctly removes an unconditional, stale self.fused_experts read and fixes original report bug 3 at the Python dispatch boundary. It is a partial fix only and does not resolve or verify the other eight reported deployment failures.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-6fd17efaaf84/venv/bin/python <independent base first-forward harness>",
+      "exit_code": 0,
+      "what_was_measured": "At the recorded base, GGUFMoEMethod lacked fused_experts, apply raised AttributeError, and the mocked fused_moe_gguf kernel was not called."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-6fd17efaaf84/venv/bin/python -m pytest -q test/registered/quant/test_gguf.py -k TestGGUFMoEMethod",
+      "exit_code": 0,
+      "what_was_measured": "At the exact candidate commit, both submitted regression tests passed (2 passed, 1 deselected), covering standard argument forwarding/result propagation and rejection of unsupported activation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-6fd17efaaf84/venv/bin/python <independent candidate adversarial harness>",
+      "exit_code": 0,
+      "what_was_measured": "Standard dispatch reached the mocked GGUF kernel and propagated output; an extraneous fused_experts instance attribute no longer affected direct dispatch; bypass-shaped top-k input still failed before kernel invocation."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-6fd17efaaf84/venv/bin/python -m compileall -q python/sglang/srt/layers/quantization/gguf.py test/registered/quant/test_gguf.py",
+      "exit_code": 0,
+      "what_was_measured": "Both changed Python files compiled successfully."
+    },
+    {
+      "command": "git diff 358c163250ad3b1f62939b01ce1314a0a31a0365..87a8b5c3cc8f4de4c93c937c086612634786d60b --check",
+      "exit_code": 2,
+      "what_was_measured": "Candidate diff contains trailing whitespace only in reports/j-b969a0ab5e43/raw/pytest_after.txt; no source whitespace error was reported."
+    }
+  ],
+  "gpu_execution": false,
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Bugs 1, 2, and 4 through 9 from the original nine-bug report are unchanged and unverified by this candidate.",
+    "A bypassed/non-standard top-k representation still fails in GGUFMoEMethod.apply because it is unpacked as StandardTopKOutput.",
+    "The submitted kernel test uses a mock and does not establish GGUF numerical correctness, weight materialization correctness, TP=2 collectives, or multi-node serving."
+  ],
+  "remaining_limitations": [
+    "The available GPU is AMD gfx950/ROCm, while the relevant GGUF path is unsupported on HIP in this checkout.",
+    "The reported GX10 CUDA hardware, Qwen3-235B-A22B GGUF weights, second node, and TP=2 topology were unavailable.",
+    "No full-model inference, transport/serving validation, CUDA graph capture, or distributed workload was run.",
+    "No native source changed, so there was no native component to rebuild."
+  ]
+}
