@@ -2076,6 +2076,9 @@ def run_benchmark(args_: argparse.Namespace):
     ):
         print(f"{args.dataset_name} dataset is unsupported for embeddings benchmark")
         sys.exit(1)
+    if args.dataset_name == "embedding" and args.backend not in _EMBEDDING_BACKENDS:
+        print("embedding dataset requires an embeddings benchmark backend")
+        sys.exit(1)
 
     if args.dataset_name in ["image", "mmmu"]:
         args.apply_chat_template = True
@@ -2243,6 +2246,7 @@ def cli_main():
             "sharegpt",
             "custom",
             "openai",
+            "embedding",
             "random",
             "random-ids",
             "generated-shared-prefix",
