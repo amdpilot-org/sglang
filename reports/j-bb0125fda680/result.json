@@ -1,0 +1,60 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/13809",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "request_changes",
+  "fully_resolves_original": false,
+  "summary": "The exact candidate fixes duplicate grammar compilation and masking for ordinary TP and correctly broadcasts entry-rank token IDs, but explicitly retains compile-and-mask-on-every-rank behavior for speculative TP and active context parallelism. It is therefore a valid partial fix, not a full resolution of the original unqualified feature request.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python reports/j-bb0125fda680/probe_compile_path.py base",
+      "exit_code": 0,
+      "what_was_measured": "On recorded base 358c163250ad3b1f62939b01ce1314a0a31a0365, a simulated non-entry TP rank made one backend lookup and received a Future, reproducing duplicate grammar compilation submission."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python reports/j-bb0125fda680/probe_compile_path.py candidate-ordinary",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate efa4ba5a75b21b2867e55582e7b1b98f7cf2b81f, ordinary TP made zero backend lookups on a simulated non-entry rank and carried PlaceholderGrammarObject."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python reports/j-bb0125fda680/probe_compile_path.py candidate-speculative && /tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python reports/j-bb0125fda680/probe_compile_path.py candidate-cp",
+      "exit_code": 0,
+      "what_was_measured": "Both remaining counterexamples reproduced: speculative TP and active context-parallel TP each made one backend grammar lookup on the simulated non-entry rank and received a Future."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py test/registered/unit/layers/test_sampler_grammar_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "The candidate's focused compatibility and regression suite passed 97 tests."
+    },
+    {
+      "command": "REVIEW_RUNTIME=/tmp/amdpilot-repo-j-bb0125fda680/review-runtime /tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python reports/j-bb0125fda680/two_rank_collective_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "An independent real two-process Gloo call through the candidate sampler broadcast rank 0's token, producing [(0, 3), (1, 3)] from initially divergent values."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-bb0125fda680/venv/bin/python -m compileall -q python/sglang/srt/constrained python/sglang/srt/layers/sampler.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/sampling/sampling_batch_info.py",
+      "exit_code": 0,
+      "what_was_measured": "All candidate-changed Python source paths compiled successfully under the prepared interpreter."
+    },
+    {
+      "command": "git diff --check 358c163250ad3b1f62939b01ce1314a0a31a0365..efa4ba5a75b21b2867e55582e7b1b98f7cf2b81f",
+      "exit_code": 0,
+      "what_was_measured": "The candidate diff has no whitespace errors."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "The environment probe found one AMD Instinct MI350X (gfx950), but this review did not claim a single-GPU smoke as evidence for the distributed TP contract. True TP, speculative TP, and context-parallel TP require unavailable multi-GPU architecture."
+  },
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "With tensor parallelism and speculative decoding active, tp_grammar_entry_only is false, so a non-entry TP rank still submits a grammar backend lookup and retains per-rank grammar masking.",
+    "With tensor parallelism and an active attention context-parallel group, tp_grammar_entry_only is false, so applicable non-entry ranks still compile grammars and apply masks."
+  ],
+  "remaining_limitations": [
+    "Only one GPU was assigned; true multi-GPU ordinary TP serving, speculative TP, context-parallel TP, and end-to-end overhead measurements were unavailable.",
+    "The independent two-process Gloo collective test validates token broadcast mechanics only and does not qualify distributed ROCm serving.",
+    "The deterministic tiny Llama fixture cannot supply speculative-TP or context-parallel distributed architecture and was not used as substitute evidence.",
+    "No native source files changed, so a native rebuild was not applicable."
+  ]
+}
