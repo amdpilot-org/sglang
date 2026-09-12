@@ -1,0 +1,34 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/22935",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "recommendation": "reject",
+  "fully_resolves_original": false,
+  "summary": "PR 934 at 1aa0bfa420a40d0da35caf7710f14e27ebf8c479 is test/report-only hardening. It changes no runtime or native source, and both the prepared base and exact candidate return zero reusable indices for the original fresh-prefill n-1 split case. Its ownership tests correctly prevent relabeling a descendant Mamba state as an earlier split checkpoint, but they assert the unresolved behavior rather than fix it.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6438dc671c93/venv/bin/python - <<'PY'  # actual-cache GPU probe at prepared base",
+      "exit_code": 0,
+      "what_was_measured": "At base 358c163250ad3b1f62939b01ce1314a0a31a0365 on AMD Instinct MI355X, inserting [10,20,30] with only a depth-3 Mamba state and matching [10,20] returned 0 indices; the split node had no state and the depth-3 leaf retained state 3. Exact owned depth-2 and depth-37 controls returned 2 and 37 indices equal to independent GPU arange references. Divergence at depth 31 before a depth-64 checkpoint returned 0."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6438dc671c93/venv/bin/python -m pytest -q test/registered/unit/mem_cache/test_mamba_split_checkpoint_ownership.py test/registered/unit/mem_cache/test_mamba_unittest.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 1aa0bfa420a40d0da35caf7710f14e27ebf8c479, 20 tests passed in 12.80 seconds. The candidate's n-1 test passes by requiring zero reusable indices, so this is ownership/test hardening rather than a passing regression for the original expected behavior."
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python /tmp/amdpilot-repo-j-6438dc671c93/venv/bin/python reports/j-9faf1a08927e/independent_gpu_probe.py",
+      "exit_code": 0,
+      "what_was_measured": "At exact candidate 1aa0bfa420a40d0da35caf7710f14e27ebf8c479 on AMD Instinct MI355X, the original n-1 split remained 0; exact owned depths 2 and 37 returned correct GPU index references; divergence before the first checkpoint remained 0."
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Base and candidate actual-cache probes ran on AMD Instinct MI355X with Torch 2.11.0+rocm7.2. Raw output is retained in reports/j-6438dc671c93/base-gpu-probe.txt and candidate-gpu-probe.txt; full immutable review evidence is also preserved outside the checkout at /job/review-evidence-j-6438dc671c93/.",
+  "native_rebuilt": false,
+  "remaining_counterexamples": [
+    "Insert [A,B,C] with its only complete Mamba state owned at depth 3, then match the fresh-prefill n-1 key [A,B]: the split node has no Mamba state and device_indices remains length 0.",
+    "Divergence before the first real recurrent checkpoint returns zero reusable indices even when attention KV structurally matches.",
+    "The candidate provides neither arbitrary-depth recurrent-plus-convolution checkpoint production nor an execution path that retains attention KV while replaying recurrent layers."
+  ],
+  "remaining_limitations": "No hybrid-Mamba model weights were prepared, so serving-path cold/warm logits and logprobs, arbitrary-depth complete recurrent-plus-convolution checkpoint production, and separate attention-KV retention with recurrent replay could not be architecture-qualified. The provided tiny Llama fixture is transport/engine-only and cannot validate Mamba semantics. This limitation does not obscure the cache-level counterexample, which was reproduced directly. The candidate changes no Python runtime source or native source, so no native rebuild was applicable. Imports were confirmed from /job/repo/python/sglang and the supplied interpreter; Torch resolved from /opt/venv/lib/python3.12/site-packages/torch."
+}
