@@ -1,0 +1,36 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/32507",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_verified",
+  "recommendation": "accept",
+  "fully_resolves_original": true,
+  "summary": "A fresh native rebuild reproduced the original N=16 failure at the recorded base. A separate rebuild of exact candidate 6fdbee617e969a0f65c788f41934ffbd15392b90 copied N=16 and independent positive sizes through N=4097 exactly, including the prior N=513 and N=1024 counterexamples. This is a full native-path fix, not test-only hardening.",
+  "tests": [
+    {
+      "command": "git checkout --detach 358c163250ad3b1f62939b01ce1314a0a31a0365 && HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-539eef7324e8/ext-base2 MAX_JOBS=8 /tmp/amdpilot-repo-j-539eef7324e8/venv/bin/python /job/review-evidence-j-539eef7324e8/native_probe.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name review_base_exact",
+      "exit_code": 0,
+      "what_was_measured": "Freshly compiled base native source on gfx950. N=16 was rejected with 'unexpected N'; only the pre-existing N=32, 64, and 72 specializations copied exactly. Raw log: /job/review-evidence-j-539eef7324e8/base-native-probe.log"
+    },
+    {
+      "command": "git checkout --detach 6fdbee617e969a0f65c788f41934ffbd15392b90 && HIP_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx950 TORCH_EXTENSIONS_DIR=/tmp/amdpilot-repo-j-539eef7324e8/ext-candidate MAX_JOBS=8 /tmp/amdpilot-repo-j-539eef7324e8/venv/bin/python /job/review-evidence-j-539eef7324e8/native_probe.py --source /job/repo/python/sglang/kernels/aot/csrc/elementwise/copy.cu --name review_candidate_exact",
+      "exit_code": 0,
+      "what_was_measured": "Fresh candidate native build produced exact GPU copies against deterministic CPU int32 references for all positive cases N=1 through tested N=4097, including N=16, 512, 513, 1024, and 1025. Six malformed-input classes were rejected. Raw log: /job/review-evidence-j-539eef7324e8/candidate-native-probe-full.log"
+    },
+    {
+      "command": "PYTHONPATH=/job/repo/python/sglang/kernels/aot/python HIP_VISIBLE_DEVICES=0 /tmp/amdpilot-repo-j-539eef7324e8/venv/bin/python -m pytest -q python/sglang/kernels/aot/tests/test_copy.py",
+      "exit_code": 2,
+      "what_was_measured": "Candidate regression could not collect because the prepared ROCm source tree has no architecture-specific or fallback common_ops shared library. This is an environment/package limitation, not evidence for or against behavior. Raw log: /job/review-evidence-j-539eef7324e8/candidate-regression-pytest.log"
+    }
+  ],
+  "gpu_execution": true,
+  "gpu_execution_evidence": "Base and candidate native extensions executed on AMD Instinct MI350X gfx950:sramecc+:xnack-; candidate outputs were compared exactly to independently generated CPU int32 tensors.",
+  "native_rebuilt": true,
+  "native_rebuild_evidence": "PyTorch HIP translation reported zero unsupported CUDA calls and two candidate kernel-launch translations; /opt/rocm-7.2.4/bin/hipcc compiled candidate copy.cu with --offload-arch=gfx950. The extension was loaded directly, not through the installed wheel.",
+  "remaining_counterexamples": [],
+  "remaining_limitations": [
+    "The original GLM-5.2 weights and two-node TP16/EP16 DeepEP deployment were unavailable, so full serving was not reproduced.",
+    "Only one AMD Instinct MI350X gfx950 GPU with ROCm 7.2 was assigned; NVIDIA H800/CUDA compilation and execution remain unverified.",
+    "The prepared checkout lacks a built common_ops package, so the candidate's repository pytest could not collect; direct rebuilt-native testing covered its cases and broader adversarial cases.",
+    "The review verifies the native transfer contract and production caller shape, not distributed routing or model semantic accuracy."
+  ]
+}
