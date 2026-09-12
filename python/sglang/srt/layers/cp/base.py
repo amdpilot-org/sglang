@@ -94,8 +94,13 @@ class ContextParallelStrategy(ABC):
     name: str
     kind: ContextParallelStrategyKind
 
-    def __init__(self, cp_size: int):
+    def __init__(self, cp_size: int, min_tokens: int = 0):
         self.cp_size = cp_size
+        self.min_tokens = min_tokens
+
+    def meets_token_threshold(self, num_tokens: int) -> bool:
+        """Return whether this forward is large enough to benefit from CP."""
+        return num_tokens >= self.min_tokens
 
     @property
     def cp_rank(self) -> int:
@@ -236,7 +241,7 @@ _STRATEGY: Optional[ContextParallelStrategy] = None
 
 
 def init_cp_strategy(
-    *, enable_prefill_cp: bool, cp_size: int, cp_strategy: str
+    *, enable_prefill_cp: bool, cp_size: int, cp_strategy: str, min_tokens: int = 0
 ) -> None:
     """Bind the CP strategy for this process.
 
@@ -259,11 +264,11 @@ def init_cp_strategy(
     if kind == ContextParallelStrategyKind.ZIGZAG:
         from sglang.srt.layers.cp.zigzag import ZigzagCPStrategy
 
-        _STRATEGY = ZigzagCPStrategy(cp_size=cp_size)
+        _STRATEGY = ZigzagCPStrategy(cp_size=cp_size, min_tokens=min_tokens)
     elif kind == ContextParallelStrategyKind.INTERLEAVE:
         from sglang.srt.layers.cp.interleave import InterleaveCPStrategy
 
-        _STRATEGY = InterleaveCPStrategy(cp_size=cp_size)
+        _STRATEGY = InterleaveCPStrategy(cp_size=cp_size, min_tokens=min_tokens)
     else:
         raise ValueError(
             f"Unsupported cp_strategy kind {kind} for cp_strategy={cp_strategy!r}"
@@ -287,6 +292,7 @@ def get_cp_strategy() -> Optional[ContextParallelStrategy]:
             enable_prefill_cp = parallel.enable_prefill_cp
             cp_size = parallel.attn_cp_size
             cp_strategy = parallel.cp_strategy
+            min_tokens = getattr(parallel, "prefill_cp_min_tokens", 0)
         except (AssertionError, AttributeError, RuntimeError, ValueError):
             return None
         if enable_prefill_cp:
@@ -294,6 +300,7 @@ def get_cp_strategy() -> Optional[ContextParallelStrategy]:
                 enable_prefill_cp=True,
                 cp_size=cp_size,
                 cp_strategy=cp_strategy,
+                min_tokens=min_tokens,
             )
     return _STRATEGY
 

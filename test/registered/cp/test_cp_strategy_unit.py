@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import torch
 
-from sglang.srt.layers.attention.dsa.utils import is_dsa_enable_prefill_cp
+from sglang.srt.layers.attention.dsa.utils import (
+    can_dsa_prefill_cp_interleave,
+    dsa_use_prefill_cp,
+    is_dsa_enable_prefill_cp,
+)
 from sglang.srt.layers.cp.base import (
     ContextParallelStrategyKind,
     get_cp_strategy,
@@ -120,6 +124,33 @@ class TestCPStrategyUnit(CustomTestCase):
             ),
         ):
             self.assertFalse(is_dsa_enable_prefill_cp())
+
+    def test_dsa_interleave_metadata_respects_runtime_token_threshold(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="interleave",
+            min_tokens=16,
+        )
+        below_threshold = SimpleNamespace(
+            input_ids=torch.arange(8),
+            extend_seq_lens_cpu=[8],
+            forward_mode=_ExtendMode(),
+            attn_cp_metadata=None,
+        )
+
+        with patch(
+            "sglang.srt.layers.attention.dsa.utils.is_dsa_prefill_cp_interleave",
+            return_value=True,
+        ):
+            self.assertFalse(is_cp_active(below_threshold))
+            self.assertFalse(
+                dsa_use_prefill_cp(
+                    below_threshold,
+                    dsa_enable_prefill_cp=True,
+                )
+            )
+            self.assertFalse(can_dsa_prefill_cp_interleave(below_threshold))
 
 
 class TestPrefillCPBCGReplay(CustomTestCase):
@@ -309,6 +340,58 @@ class TestCPZigzagStrategy(CustomTestCase):
         with patch.dict("os.environ", {"SGLANG_ENABLE_CP_V2": "0"}):
             self.assertTrue(is_cp_active(active_batch))
             self.assertFalse(is_cp_active(inactive_batch))
+
+    def test_is_cp_active_respects_runtime_token_threshold(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        below_threshold = SimpleNamespace(
+            input_ids=torch.arange(15),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[15],
+        )
+        at_threshold = SimpleNamespace(
+            input_ids=torch.arange(16),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[16],
+        )
+
+        self.assertFalse(is_cp_active(below_threshold))
+        self.assertTrue(is_cp_active(at_threshold))
+
+    def test_runtime_token_threshold_uses_processed_not_cached_tokens(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        cached_short_followup = SimpleNamespace(
+            input_ids=torch.arange(8),
+            forward_mode=_ExtendMode(),
+            seq_lens_cpu=[32776],
+            extend_seq_lens_cpu=[8],
+        )
+
+        self.assertFalse(is_cp_active(cached_short_followup))
+
+    def test_runtime_token_threshold_ignores_runner_padding(self):
+        init_cp_strategy(
+            enable_prefill_cp=True,
+            cp_size=4,
+            cp_strategy="zigzag",
+            min_tokens=16,
+        )
+        padded_short_batch = SimpleNamespace(
+            input_ids=torch.arange(32),
+            forward_mode=_ExtendMode(),
+            extend_seq_lens_cpu=[8],
+        )
+
+        self.assertFalse(is_cp_active(padded_short_batch))
 
     def _expected_metadata(self, *, rank, cp_size, seq_lens, extend_seq_lens):
         bs = len(extend_seq_lens)

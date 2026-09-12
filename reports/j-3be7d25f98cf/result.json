@@ -1,0 +1,42 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/37944",
+  "mirror_issue_url": "https://github.com/amdpilot-org/sglang/issues/2779",
+  "candidate_pr_url": "https://github.com/amdpilot-org/sglang/pull/2706",
+  "review_pr_url": "https://github.com/amdpilot-org/sglang/pull/2745",
+  "candidate_commit": "0e4ffed88e34a6c710e94cfb49253c5fbcaa1283",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "fixed",
+  "summary": "Preserved the candidate's dynamic prefill-CP threshold and corrected its remaining DSA interleave inconsistency. DSA metadata sharding now uses the same runtime is_cp_active decision as CP execution, so an 8-token batch below a 16-token threshold remains fully non-CP.",
+  "tests": [
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3be7d25f98cf/venv/bin/python <standalone DSA interleave threshold reproduction> at candidate 0e4ffed88e34a6c710e94cfb49253c5fbcaa1283",
+      "exit_code": 1,
+      "what_was_measured": "Failing-before consistency check: is_cp_active and dsa_use_prefill_cp were false while can_dsa_prefill_cp_interleave was true."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3be7d25f98cf/venv/bin/python <standalone DSA interleave threshold reproduction> after correction",
+      "exit_code": 0,
+      "what_was_measured": "Passing-after consistency check: is_cp_active, dsa_use_prefill_cp, and can_dsa_prefill_cp_interleave were all false."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3be7d25f98cf/venv/bin/python -m pytest -q test/registered/cp/test_cp_strategy_unit.py test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_cli test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_prefill_cp_min_tokens_must_be_non_negative test/registered/unit/server_args/test_server_args.py::TestContextParallelServerArgs::test_context_parallel_handler_initializes_cp_strategy",
+      "exit_code": 0,
+      "what_was_measured": "Dynamic CP strategy, DSA interleave adversarial regression, and server-argument compatibility: 31 tests and 18 subtests passed."
+    },
+    {
+      "command": "PYTHONPATH=python /tmp/amdpilot-repo-j-3be7d25f98cf/venv/bin/python -m compileall -q python/sglang/srt/layers/attention/dsa/utils.py test/registered/cp/test_cp_strategy_unit.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python source and regression test compile successfully."
+    }
+  ],
+  "gpu_execution": {
+    "value": false,
+    "evidence": "Torch detected an AMD Instinct MI355X with ROCm/HIP 7.2, but SGLang explicitly disables DSA prefill CP on HIP. No qualifying CP kernel or model forward executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "The original GLM-5.2-FP8 model and weights were unavailable.",
+    "The assigned ROCm architecture is unsupported for DSA prefill CP, so the original CUDA multi-rank forward, independent GPU numerical equivalence, and TTFT improvement remain unverified.",
+    "No native source changed, so a native rebuild was not applicable."
+  ]
+}

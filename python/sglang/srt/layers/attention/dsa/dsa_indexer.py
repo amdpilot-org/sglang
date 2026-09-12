@@ -28,6 +28,7 @@ from sglang.srt.layers.attention.dsa.paged_mqa_logits_backend import (
 )
 from sglang.srt.layers.attention.dsa.utils import (
     aiter_can_use_preshuffle_paged_mqa,
+    dsa_use_prefill_cp,
     is_dsa_enable_prefill_cp,
     is_graph_dsa_split_op_surface,
 )
@@ -1518,7 +1519,9 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
             )
 
         # Optimization: fast path when skipping topk computation
-        if skip_logits_computation and (not self.dsa_enable_prefill_cp):
+        if skip_logits_computation and not dsa_use_prefill_cp(
+            forward_batch, self.dsa_enable_prefill_cp
+        ):
             topk_result = self._forward_cuda_k_only(
                 x,
                 positions,
@@ -1547,9 +1550,8 @@ class Indexer(DSANPUIndexerMixin, BaseFusedOp):
             q_fp8, weights = self._fused_q_prepare_and_store(
                 x, q_lora, positions, forward_batch, layer_id, act_quant
             )
-        elif (
-            is_graph_dsa_split_op_surface(forward_batch)
-            and not self.dsa_enable_prefill_cp
+        elif is_graph_dsa_split_op_surface(forward_batch) and not dsa_use_prefill_cp(
+            forward_batch, self.dsa_enable_prefill_cp
         ):
             # Default path for non-CP prefill under PCG/BCG: run the whole indexer
             # (q/k proj, head gate, k-cache store, topk) as a single eager split op
