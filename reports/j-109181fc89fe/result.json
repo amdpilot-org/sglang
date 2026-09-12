@@ -1,0 +1,40 @@
+{
+  "source_issue_url": "https://github.com/sgl-project/sglang/issues/13809",
+  "base_commit": "358c163250ad3b1f62939b01ce1314a0a31a0365",
+  "outcome": "candidate_rejected",
+  "summary": "Preserved PR 2975's valid ordinary-TP entry-rank-only grammar compilation, masking, and token broadcast. Independently reproduced both review counterexamples at the candidate tree: speculative TP and context-parallel TP select the legacy path and a simulated non-entry rank submits its own grammar lookup. No further source correction is justified in the assigned one-GPU environment because speculative verification requires real per-rank FSM/tree state and context parallelism requires synchronization across a topology broader than the candidate's attn-TP groups.",
+  "tests": [
+    {
+      "command": "/tmp/amdpilot-repo-j-109181fc89fe/venv/bin/python reports/j-109181fc89fe/reproduce_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "Against the candidate implementation, simulated non-entry ranks made one grammar compile/cache lookup in both speculative-TP and CP-active-TP fallback modes; ordinary TP made zero and installed PlaceholderGrammarObject."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-109181fc89fe/venv/bin/python -m pytest -q test/registered/unit/constrained/test_grammar_manager.py test/registered/unit/sampling/test_sampling_batch_info.py test/registered/unit/layers/test_sampler_grammar_tp_sync.py",
+      "exit_code": 0,
+      "what_was_measured": "Candidate compatibility and regression suite: 97 passed, including ordinary-TP compile-once behavior, failure synchronization, broadcast selection, legacy all-reduce fallback, and no collective for unconstrained batches."
+    },
+    {
+      "command": "/tmp/amdpilot-repo-j-109181fc89fe/venv/bin/python -m compileall -q python/sglang/srt/constrained python/sglang/srt/layers/sampler.py python/sglang/srt/model_executor/model_runner.py python/sglang/srt/sampling/sampling_batch_info.py reports/j-109181fc89fe/reproduce_counterexamples.py",
+      "exit_code": 0,
+      "what_was_measured": "Changed Python modules and the independent reproducer compile successfully."
+    },
+    {
+      "command": "inline torch ROCm masked-argmax reference (output retained in reports/j-109181fc89fe/raw/gpu-reference.txt)",
+      "exit_code": 0,
+      "what_was_measured": "On the assigned AMD Instinct MI355X, masked argmax [2, 1] matched the independently constructed allowed-token reference [2, 1]. This measures mask numerics only, not distributed serving."
+    }
+  ],
+  "gpu_execution": {
+    "value": true,
+    "evidence": "Torch 2.11.0+rocm7.2 executed the numerical reference on one AMD Instinct MI355X. torch.cuda.device_count() returned 1, so TP/CP distributed serving was not executed."
+  },
+  "native_rebuilt": false,
+  "remaining_limitations": [
+    "TP constrained decoding with speculative decoding still compiles and applies grammar state per rank; safely changing it requires synchronizing speculative tree masks, FSM advancement, accept lengths, accept indexes, and output tokens.",
+    "TP constrained decoding with active context parallelism still compiles and applies grammar state in each applicable attention-TP group; safely changing it requires ownership and collectives spanning the combined attention CP and TP request topology.",
+    "Only one GPU was assigned, so true TP=2/TP=4, speculative TP, context-parallel TP, DP-attention distributed serving, and end-to-end overhead measurement remain unverified.",
+    "The deterministic tiny Llama fixture cannot qualify the missing distributed architectures and was not used as substitute evidence.",
+    "No native sources changed, so a native rebuild was not applicable."
+  ]
+}
