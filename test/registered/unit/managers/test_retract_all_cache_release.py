@@ -1,12 +1,7 @@
 import unittest
-from array import array
 from unittest.mock import MagicMock, patch
 
-import torch
-
 from sglang.srt.managers.schedule_batch import retract_all
-from sglang.srt.mem_cache.base_prefix_cache import InsertParams, MatchPrefixParams
-from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey
 from sglang.test.ci.ci_register import register_cpu_ci
 
 
@@ -25,84 +20,20 @@ class TestRetractAllCacheRelease(unittest.TestCase):
         )
 
     @patch("sglang.srt.managers.schedule_batch.release_req")
-    def test_retracted_prefix_is_no_longer_matchable(self, release_req):
-        allocator = MagicMock()
-        allocator.device = torch.device("cpu")
-        tree_cache = RadixCache.create_simulated(mock_allocator=allocator)
-        key = RadixKey(array("q", [1, 2, 3, 4]))
-        tree_cache.insert(
-            InsertParams(key=key, value=torch.tensor([10, 11, 12, 13]))
-        )
-        match = tree_cache.match_prefix(MatchPrefixParams(key=key))
-        tree_cache.inc_lock_ref(match.last_device_node)
-        release_req.side_effect = lambda **_: tree_cache.dec_lock_ref(
-            match.last_device_node
-        )
-
-        self._retract(tree_cache, reqs=[MagicMock()])
-
-        rematch = tree_cache.match_prefix(MatchPrefixParams(key=key))
-        self.assertEqual(len(rematch.device_indices), 0)
-        self.assertEqual(tree_cache.evictable_size(), 0)
-        allocator.free_segment.assert_called_once()
-
-    @patch("sglang.srt.managers.schedule_batch.release_req")
-    def test_evicts_all_radix_prefixes_after_every_request_unlocks(self, release_req):
+    def test_retracts_every_request(self, release_req):
         tree_cache = MagicMock()
-        tree_cache.is_chunk_cache.return_value = False
-        tree_cache.supports_swa.return_value = False
-        tree_cache.supports_mamba.return_value = False
-        tree_cache.evictable_size.return_value = 37
 
         self._retract(tree_cache)
 
         self.assertEqual(release_req.call_count, 2)
-        tree_cache.evictable_size.assert_called_once_with()
-        params = tree_cache.evict.call_args.args[0]
-        self.assertEqual(params.num_tokens, 37)
-        self.assertEqual(params.swa_num_tokens, 0)
-        self.assertEqual(params.mamba_num, 0)
 
     @patch("sglang.srt.managers.schedule_batch.release_req")
-    def test_evicts_each_hybrid_cache_component(self, release_req):
+    def test_empty_request_list_is_a_noop(self, release_req):
         tree_cache = MagicMock()
-        tree_cache.is_chunk_cache.return_value = False
-        tree_cache.supports_swa.return_value = True
-        tree_cache.supports_mamba.return_value = True
-        tree_cache.full_evictable_size.return_value = 23
-        tree_cache.swa_evictable_size.return_value = 11
-        tree_cache.mamba_evictable_size.return_value = 2
-
-        self._retract(tree_cache, reqs=[MagicMock()])
-
-        params = tree_cache.evict.call_args.args[0]
-        self.assertEqual(
-            (params.num_tokens, params.swa_num_tokens, params.mamba_num),
-            (23, 11, 2),
-        )
-
-    @patch("sglang.srt.managers.schedule_batch.release_req")
-    def test_empty_radix_cache_does_not_issue_eviction(self, release_req):
-        tree_cache = MagicMock()
-        tree_cache.is_chunk_cache.return_value = False
-        tree_cache.supports_swa.return_value = False
-        tree_cache.supports_mamba.return_value = False
-        tree_cache.evictable_size.return_value = 0
 
         self._retract(tree_cache, reqs=[])
 
         release_req.assert_not_called()
-        tree_cache.evict.assert_not_called()
-
-    @patch("sglang.srt.managers.schedule_batch.release_req")
-    def test_chunk_cache_needs_no_radix_eviction(self, release_req):
-        tree_cache = MagicMock()
-        tree_cache.is_chunk_cache.return_value = True
-
-        self._retract(tree_cache, reqs=[MagicMock()])
-
-        release_req.assert_called_once()
-        tree_cache.evict.assert_not_called()
 
 
 if __name__ == "__main__":

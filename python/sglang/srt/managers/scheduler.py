@@ -5391,6 +5391,22 @@ class Scheduler(
                 hisparse_coordinator=self.hisparse_coordinator,
                 offload_kv=False,
             )
+
+        retained_disagg_prefill_kv = (
+            self.disaggregation_mode == DisaggregationMode.PREFILL
+            and self.chunked_req is not None
+            and not self.chunked_req.finished()
+        )
+        if not retained_disagg_prefill_kv:
+            # Retract is used as a KV-provenance boundary around weight updates.
+            # Reset the complete cache namespace even when there were no active
+            # requests: finished requests can leave reusable prefixes behind.
+            # reset(), unlike pressure eviction, also clears hierarchical host
+            # backing state instead of potentially staging device entries there.
+            self.tree_cache.reset()
+            self.req_to_token_pool.clear()
+            self.token_to_kv_pool_allocator.clear()
+            self.req_to_token_pool.reset_aux_cache_allocator()
         self.running_batch.reqs = []
         for req in retract_reqs:
             if self.disaggregation_mode == DisaggregationMode.DECODE:
